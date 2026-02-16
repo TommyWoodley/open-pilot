@@ -17,7 +17,12 @@ type Styles struct {
 	SystemPrefix func(string) string
 	Heading      func(string) string
 	List         func(string) string
+	Quote        func(string) string
+	Link         func(label, url string) string
 	InlineCode   func(string) string
+	Bold         func(string) string
+	Italic       func(string) string
+	Strike       func(string) string
 	CodeBlock    func(lang, text string) string
 }
 
@@ -42,18 +47,48 @@ func FormatMessageForTranscript(msg domain.Message, styles Styles) RenderedMessa
 		switch block.Kind {
 		case BlockParagraph:
 			for _, l := range strings.Split(block.Text, "\n") {
-				lines = append(lines, RenderInlineCode(l, styles.InlineCode))
+				lines = append(lines, RenderInline(l, InlineStyles{
+					Code:   styles.InlineCode,
+					Link:   styles.Link,
+					Bold:   styles.Bold,
+					Italic: styles.Italic,
+					Strike: styles.Strike,
+				}))
 			}
 		case BlockHeading:
-			txt := RenderInlineCode(block.Text, styles.InlineCode)
+			txt := RenderInline(block.Text, InlineStyles{
+				Code:   styles.InlineCode,
+				Link:   styles.Link,
+				Bold:   styles.Bold,
+				Italic: styles.Italic,
+				Strike: styles.Strike,
+			})
 			if styles.Heading != nil {
 				txt = styles.Heading(txt)
 			}
 			lines = append(lines, txt)
 		case BlockList:
-			txt := RenderInlineCode(block.Text, styles.InlineCode)
+			txt := RenderInline(block.Text, InlineStyles{
+				Code:   styles.InlineCode,
+				Link:   styles.Link,
+				Bold:   styles.Bold,
+				Italic: styles.Italic,
+				Strike: styles.Strike,
+			})
 			if styles.List != nil {
 				txt = styles.List(txt)
+			}
+			lines = append(lines, txt)
+		case BlockQuote:
+			txt := RenderInline(block.Text, InlineStyles{
+				Code:   styles.InlineCode,
+				Link:   styles.Link,
+				Bold:   styles.Bold,
+				Italic: styles.Italic,
+				Strike: styles.Strike,
+			})
+			if styles.Quote != nil {
+				txt = styles.Quote(txt)
 			}
 			lines = append(lines, txt)
 		case BlockCode:

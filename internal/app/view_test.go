@@ -69,3 +69,58 @@ func TestViewRendersMarkdownAndCodeBlockContent(t *testing.T) {
 		}
 	}
 }
+
+func TestViewRendersInlineEmphasisContent(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	s.Messages = append(s.Messages, domain.Message{
+		ID:   "msg-2",
+		Role: domain.RoleAssistant,
+		Content: "This repo is a **Cisco DLP scanning service** plus " +
+			"its _deployment_ and ~~legacy~~ stack.",
+	})
+	m.Width = 100
+	m.Height = 24
+
+	view := m.View()
+	checks := []string{
+		"Cisco DLP scanning service",
+		"deployment",
+		"legacy",
+	}
+	for _, expected := range checks {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("expected view to contain %q", expected)
+		}
+	}
+}
+
+func TestViewRendersLinkFallbackAndQuoteBlock(t *testing.T) {
+	t.Setenv("OPEN_PILOT_DISABLE_OSC8", "1")
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	s.Messages = append(s.Messages, domain.Message{
+		ID:      "msg-3",
+		Role:    domain.RoleAssistant,
+		Content: "> Blockquote text\n[Link text](https://example.com)",
+	})
+	m.Width = 100
+	m.Height = 24
+
+	view := m.View()
+	checks := []string{
+		"Blockquote text",
+		"Link text (https://example.com)",
+		"│",
+	}
+	for _, expected := range checks {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("expected view to contain %q", expected)
+		}
+	}
+}

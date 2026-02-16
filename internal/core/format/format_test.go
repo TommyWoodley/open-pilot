@@ -1,6 +1,7 @@
 package format
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/thwoodle/open-pilot/internal/domain"
@@ -73,5 +74,141 @@ func TestBuildTranscriptLines(t *testing.T) {
 	lines := BuildTranscriptLines([]domain.Message{{Role: domain.RoleAssistant, Content: "hello"}}, Styles{})
 	if len(lines) == 0 {
 		t.Fatalf("expected transcript lines")
+	}
+}
+
+func TestRenderInlineBoldItalicStrike(t *testing.T) {
+	got := RenderInline("a **b** __c__ *d* _e_ ~~f~~", InlineStyles{
+		Bold: func(s string) string { return "<b>" + s + "</b>" },
+		Italic: func(s string) string {
+			return "<i>" + s + "</i>"
+		},
+		Strike: func(s string) string {
+			return "<s>" + s + "</s>"
+		},
+	})
+	checks := []string{"<b>b</b>", "<b>c</b>", "<i>d</i>", "<i>e</i>", "<s>f</s>"}
+	for _, c := range checks {
+		if !strings.Contains(got, c) {
+			t.Fatalf("expected %q in %q", c, got)
+		}
+	}
+}
+
+func TestRenderInlineCodeTakesPrecedence(t *testing.T) {
+	got := RenderInline("x `**not-bold**` y **bold**", InlineStyles{
+		Code: func(s string) string { return "<code>" + s + "</code>" },
+		Bold: func(s string) string { return "<b>" + s + "</b>" },
+	})
+	if !strings.Contains(got, "<code>**not-bold**</code>") {
+		t.Fatalf("expected code span to remain literal for emphasis markers, got %q", got)
+	}
+	if !strings.Contains(got, "<b>bold</b>") {
+		t.Fatalf("expected bold outside code span, got %q", got)
+	}
+}
+
+func TestRenderInlineUnmatchedDelimitersRemainLiteral(t *testing.T) {
+	input := "a **b and _c and ~~d"
+	got := RenderInline(input, InlineStyles{
+		Bold:   func(s string) string { return "<b>" + s + "</b>" },
+		Italic: func(s string) string { return "<i>" + s + "</i>" },
+		Strike: func(s string) string { return "<s>" + s + "</s>" },
+	})
+	if got != input {
+		t.Fatalf("expected unmatched delimiters to remain literal, got %q", got)
+	}
+}
+
+func TestRenderInlineMixedMarkers(t *testing.T) {
+	got := RenderInline("**Bold _and italic_** plus ~~strike~~", InlineStyles{
+		Bold:   func(s string) string { return "<b>" + s + "</b>" },
+		Italic: func(s string) string { return "<i>" + s + "</i>" },
+		Strike: func(s string) string { return "<s>" + s + "</s>" },
+	})
+	if !strings.Contains(got, "<b>Bold <i>and italic</i></b>") {
+		t.Fatalf("expected nested bold+italic output, got %q", got)
+	}
+	if !strings.Contains(got, "<s>strike</s>") {
+		t.Fatalf("expected strike output, got %q", got)
+	}
+}
+
+func TestRenderInlineLinkUsesRenderer(t *testing.T) {
+	got := RenderInline("see [Docs](https://example.com)", InlineStyles{
+		Link: func(label, url string) string {
+			return "<a href=\"" + url + "\">" + label + "</a>"
+		},
+	})
+	if !strings.Contains(got, "<a href=\"https://example.com\">Docs</a>") {
+		t.Fatalf("expected link callback output, got %q", got)
+	}
+}
+
+func TestRenderInlineLinkFallbackWhenRendererMissing(t *testing.T) {
+	got := RenderInline("see [Docs](https://example.com)", InlineStyles{})
+	if !strings.Contains(got, "Docs (https://example.com)") {
+		t.Fatalf("expected fallback link rendering, got %q", got)
+	}
+}
+
+func TestRenderInlineLinkAndEmphasis(t *testing.T) {
+	got := RenderInline("**[Docs](https://example.com)**", InlineStyles{
+		Link: func(label, url string) string {
+			return label + " (" + url + ")"
+		},
+		Bold: func(s string) string { return "<b>" + s + "</b>" },
+	})
+	if !strings.Contains(got, "<b>Docs (https://example.com)</b>") {
+		t.Fatalf("expected link inside bold rendering, got %q", got)
+	}
+}
+
+func TestRenderInlineLinkInsideCodeStaysLiteral(t *testing.T) {
+	got := RenderInline("`[Docs](https://example.com)`", InlineStyles{
+		Code: func(s string) string { return "<code>" + s + "</code>" },
+		Link: func(label, url string) string {
+			return "<a>" + label + "</a>"
+		},
+	})
+	if got != "<code>[Docs](https://example.com)</code>" {
+		t.Fatalf("expected literal link markdown inside code, got %q", got)
+	}
+}
+
+func TestRenderInlineMalformedLinksRemainLiteral(t *testing.T) {
+	inputs := []string{
+		"[Docs](",
+		"[Docs]url)",
+		"[](https://example.com)",
+		"[Docs]()",
+	}
+	for _, input := range inputs {
+		got := RenderInline(input, InlineStyles{
+			Link: func(label, url string) string { return "X" },
+		})
+		if got != input {
+			t.Fatalf("expected malformed link to remain literal. input=%q got=%q", input, got)
+		}
+	}
+}
+
+func TestParseMarkdownBlocksQuote(t *testing.T) {
+	blocks := ParseMarkdownBlocks("> hello", false)
+	if len(blocks) != 1 {
+		t.Fatalf("expected single block, got %d", len(blocks))
+	}
+	if blocks[0].Kind != BlockQuote || blocks[0].Text != "hello" {
+		t.Fatalf("expected quote block 'hello', got kind=%q text=%q", blocks[0].Kind, blocks[0].Text)
+	}
+}
+
+func TestParseMarkdownBlocksListWithQuoteMarkerStaysList(t *testing.T) {
+	blocks := ParseMarkdownBlocks("- > quoted", false)
+	if len(blocks) != 1 {
+		t.Fatalf("expected single block, got %d", len(blocks))
+	}
+	if blocks[0].Kind != BlockList {
+		t.Fatalf("expected list block, got %q", blocks[0].Kind)
 	}
 }

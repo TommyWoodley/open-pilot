@@ -45,6 +45,23 @@ var (
 	MarkdownListStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("252"))
 
+	MarkdownQuoteStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("244")).
+				PaddingLeft(1)
+
+	MarkdownLinkStyle = lipgloss.NewStyle().
+				Underline(true).
+				Foreground(lipgloss.Color("69"))
+
+	MarkdownBoldStyle = lipgloss.NewStyle().
+				Bold(true)
+
+	MarkdownItalicStyle = lipgloss.NewStyle().
+				Italic(true)
+
+	MarkdownStrikeStyle = lipgloss.NewStyle().
+				Strikethrough(true)
+
 	InlineCodeStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("212")).
 			Background(lipgloss.Color("236"))
