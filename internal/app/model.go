@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -92,7 +93,11 @@ func normalizeRepoPath(path string) (string, error) {
 		return "", fmt.Errorf("repo path cannot be empty")
 	}
 	if !filepath.IsAbs(path) {
-		return "", fmt.Errorf("repo path must be absolute")
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve working directory: %w", err)
+		}
+		path = filepath.Join(wd, path)
 	}
 	return filepath.Clean(path), nil
 }

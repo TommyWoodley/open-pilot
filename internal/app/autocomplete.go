@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -23,18 +25,18 @@ func (m *Model) applyAutocomplete() {
 	context := tokens[:idx]
 	current := tokens[idx]
 
-	options := m.tokenOptionsForContext(context)
+	options := m.tokenOptionsForContext(context, current)
 	if len(options) == 0 {
 		return
 	}
 
-	contextKey := strings.Join(context, "\x00")
+	contextKey := strings.Join(context, "\x00") + "\x00" + current
 	if m.completionPrefix != contextKey || !equalStrings(m.completionOptions, options) {
 		m.completionPrefix = contextKey
 		m.completionOptions = options
 		start := firstMatchingIndex(options, current)
 		if start < 0 {
-			return
+			start = 0
 		}
 		m.completionIndex = start
 	}
@@ -59,7 +61,7 @@ func (m *Model) resetAutocomplete() {
 	m.completionIndex = 0
 }
 
-func (m *Model) tokenOptionsForContext(context []string) []string {
+func (m *Model) tokenOptionsForContext(context []string, current string) []string {
 	switch len(context) {
 	case 0:
 		return []string{"/help", "/provider", "/session"}
@@ -84,6 +86,9 @@ func (m *Model) tokenOptionsForContext(context []string) []string {
 		}
 		if context[0] == "/session" && context[1] == "repo" {
 			return []string{"use"}
+		}
+		if context[0] == "/session" && context[1] == "add-repo" {
+			return pathCompletionOptions(current)
 		}
 	case 3:
 		if context[0] == "/session" && context[1] == "repo" && context[2] == "use" {
@@ -117,7 +122,7 @@ func (m *Model) commandSuggestions(input string) []string {
 		"/session new <name>",
 		"/session list",
 		"/session use <session-id>",
-		"/session add-repo <abs-path> [label]",
+		"/session add-repo <path> [label]",
 		"/session repos",
 		"/session repo use <repo-id>",
 	}
@@ -131,6 +136,13 @@ func (m *Model) commandSuggestions(input string) []string {
 		}
 	}
 
+	if strings.HasPrefix(raw, "/session add-repo ") {
+		pathPrefix := strings.TrimPrefix(raw, "/session add-repo ")
+		for _, p := range limitStrings(pathCompletionOptions(pathPrefix), 15) {
+			candidates = append(candidates, "/session add-repo "+p)
+		}
+	}
+
 	filtered := make([]string, 0, len(candidates))
 	for _, c := range candidates {
 		if raw == "/" || strings.HasPrefix(c, raw) {
@@ -140,6 +152,86 @@ func (m *Model) commandSuggestions(input string) []string {
 
 	sort.Strings(filtered)
 	return dedupeStrings(filtered)
+}
+
+func pathCompletionOptions(current string) []string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+
+	absMode := strings.HasPrefix(current, string(os.PathSeparator))
+	trailing := strings.HasSuffix(current, string(os.PathSeparator))
+
+	if current == "" {
+		return readDirMatches(wd, "", "", false)
+	}
+
+	dirPart := current
+	prefix := ""
+	if !trailing {
+		dirPart = filepath.Dir(current)
+		prefix = filepath.Base(current)
+	}
+
+	searchDir := dirPart
+	outputBase := dirPart
+	if absMode {
+		if searchDir == "" {
+			searchDir = string(os.PathSeparator)
+			outputBase = string(os.PathSeparator)
+		}
+		searchDir = filepath.Clean(searchDir)
+		if outputBase == "." {
+			outputBase = string(os.PathSeparator)
+		}
+		if !strings.HasSuffix(outputBase, string(os.PathSeparator)) {
+			outputBase += string(os.PathSeparator)
+		}
+		return readDirMatches(searchDir, outputBase, prefix, true)
+	}
+
+	if dirPart == "." || dirPart == "" {
+		searchDir = wd
+		if dirPart == "." {
+			outputBase = "./"
+		} else {
+			outputBase = ""
+		}
+	} else {
+		searchDir = filepath.Join(wd, dirPart)
+		outputBase = dirPart
+		if !strings.HasSuffix(outputBase, string(os.PathSeparator)) {
+			outputBase += string(os.PathSeparator)
+		}
+	}
+
+	return readDirMatches(searchDir, outputBase, prefix, false)
+}
+
+func readDirMatches(searchDir, outputBase, prefix string, absMode bool) []string {
+	entries, err := os.ReadDir(searchDir)
+	if err != nil {
+		return nil
+	}
+
+	matches := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		candidate := outputBase + name
+		if absMode && strings.HasPrefix(candidate, "//") {
+			candidate = string(os.PathSeparator) + strings.TrimPrefix(candidate, "//")
+		}
+		if entry.IsDir() {
+			candidate += string(os.PathSeparator)
+		}
+		matches = append(matches, candidate)
+	}
+	sort.Strings(matches)
+	return matches
 }
 
 func splitTokens(input string) ([]string, bool) {
@@ -184,4 +276,11 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func limitStrings(values []string, limit int) []string {
+	if limit <= 0 || len(values) <= limit {
+		return values
+	}
+	return values[:limit]
 }

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -71,5 +73,29 @@ func TestSuggestionsRenderUnderInput(t *testing.T) {
 	}
 	if !strings.Contains(view, "/session list") {
 		t.Fatalf("expected matching command suggestions in view")
+	}
+}
+
+func TestAutocompleteAddRepoPath(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	targetDir := filepath.Join(tmp, "repo-alpha")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+
+	m := NewModel(nil, config.Default())
+	m.Input = "/session add-repo " + filepath.Join(tmp, "rep")
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	nextModel, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("expected Model type from Update")
+	}
+
+	expected := "/session add-repo " + targetDir + string(os.PathSeparator) + " "
+	if nextModel.Input != expected {
+		t.Fatalf("expected path autocomplete %q, got %q", expected, nextModel.Input)
 	}
 }
