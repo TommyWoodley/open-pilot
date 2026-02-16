@@ -1,0 +1,7 @@
+# Binaries
+open-pilot
+bin/
+
+# Editor / OS artifacts
+*.swp
+.DS_Store
