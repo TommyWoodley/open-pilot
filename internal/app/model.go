@@ -39,6 +39,10 @@ type Model struct {
 
 	keys keyMap
 
+	TranscriptScroll                int
+	AutoFollowTranscript            bool
+	lastRenderedTranscriptLineCount int
+
 	completionPrefix  string
 	completionOptions []string
 	completionIndex   int
@@ -47,15 +51,18 @@ type Model struct {
 // NewModel returns the initial application state.
 func NewModel(manager providers.Manager, cfg config.Config) Model {
 	m := Model{
-		StatusText:    "No agent connected",
-		ProviderState: "disconnected",
-		Sessions:      make(map[string]*domain.Session),
-		SessionOrder:  make([]string, 0),
-		manager:       manager,
-		cfg:           cfg,
-		nextID:        1,
-		pending:       make(map[string]int),
-		keys:          defaultKeyMap(),
+		StatusText:                      "No agent connected",
+		ProviderState:                   "disconnected",
+		Sessions:                        make(map[string]*domain.Session),
+		SessionOrder:                    make([]string, 0),
+		manager:                         manager,
+		cfg:                             cfg,
+		nextID:                          1,
+		pending:                         make(map[string]int),
+		keys:                            defaultKeyMap(),
+		TranscriptScroll:                0,
+		AutoFollowTranscript:            true,
+		lastRenderedTranscriptLineCount: 0,
 	}
 	if manager != nil {
 		m.providerEvents = manager.Events()
@@ -110,4 +117,30 @@ func (m *Model) shutdownProviders(ctx context.Context) {
 		ctx = context.Background()
 	}
 	_ = m.manager.StopAll(ctx)
+}
+
+func (m Model) transcriptVisibleLines() int {
+	return max(m.Height-8, 6)
+}
+
+func (m Model) maxTranscriptScroll() int {
+	total := len(m.buildTranscriptLines())
+	visible := m.transcriptVisibleLines()
+	if total <= visible {
+		return 0
+	}
+	return total - visible
+}
+
+func (m *Model) clampTranscriptScroll() {
+	if m.TranscriptScroll < 0 {
+		m.TranscriptScroll = 0
+	}
+	maxScroll := m.maxTranscriptScroll()
+	if m.TranscriptScroll > maxScroll {
+		m.TranscriptScroll = maxScroll
+	}
+	if m.TranscriptScroll == 0 {
+		m.AutoFollowTranscript = true
+	}
 }

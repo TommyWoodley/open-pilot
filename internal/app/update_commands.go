@@ -137,6 +137,7 @@ func helpText() string {
 		"/provider use <codex|cursor>",
 		"/provider status",
 		"/help",
+		"Navigation: Up/Down/PgUp/PgDn/Home/End scroll transcript",
 	}, "\n")
 }
 

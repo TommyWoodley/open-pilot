@@ -13,6 +13,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Quit):
 			m.shutdownProviders(nil)
 			return m, tea.Quit
+		case key.Matches(msg, m.keys.ScrollUp):
+			m.TranscriptScroll++
+			m.AutoFollowTranscript = false
+			m.clampTranscriptScroll()
+			return m, nil
+		case key.Matches(msg, m.keys.ScrollDown):
+			m.TranscriptScroll--
+			if m.TranscriptScroll <= 0 {
+				m.TranscriptScroll = 0
+				m.AutoFollowTranscript = true
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.PageUp):
+			m.TranscriptScroll += m.transcriptVisibleLines()
+			m.AutoFollowTranscript = false
+			m.clampTranscriptScroll()
+			return m, nil
+		case key.Matches(msg, m.keys.PageDown):
+			m.TranscriptScroll -= m.transcriptVisibleLines()
+			if m.TranscriptScroll <= 0 {
+				m.TranscriptScroll = 0
+				m.AutoFollowTranscript = true
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.ScrollTop):
+			m.TranscriptScroll = m.maxTranscriptScroll()
+			m.AutoFollowTranscript = m.TranscriptScroll == 0
+			return m, nil
+		case key.Matches(msg, m.keys.ScrollBottom):
+			m.TranscriptScroll = 0
+			m.AutoFollowTranscript = true
+			return m, nil
 		case key.Matches(msg, m.keys.Submit):
 			m.resetAutocomplete()
 			m = m.processEnter()

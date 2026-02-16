@@ -77,4 +77,8 @@ func (m *Model) handleProviderEvent(ev providers.Event) {
 		})
 		m.StatusText = "Provider disconnected"
 	}
+
+	if m.AutoFollowTranscript {
+		m.TranscriptScroll = 0
+	}
 }

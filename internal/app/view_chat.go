@@ -7,12 +7,38 @@ import (
 )
 
 func (m Model) renderTranscript() string {
-	s := m.activeSession()
-	if s == nil || len(s.Messages) == 0 {
+	allLines := m.buildTranscriptLines()
+	if len(allLines) == 0 {
 		return ui.BodyStyle.Width(max(m.Width-2, 50)).Render("No messages yet. Start with /session new <name>")
 	}
 
-	maxLines := max(m.Height-8, 6)
+	visible := m.transcriptVisibleLines()
+	total := len(allLines)
+	maxScrollable := max(total-visible, 0)
+
+	scroll := m.TranscriptScroll
+	if m.AutoFollowTranscript {
+		scroll = 0
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	if scroll > maxScrollable {
+		scroll = maxScrollable
+	}
+
+	start := max(total-visible-scroll, 0)
+	end := min(start+visible, total)
+
+	return ui.BodyStyle.Width(max(m.Width-2, 50)).Render(strings.Join(allLines[start:end], "\n"))
+}
+
+func (m Model) buildTranscriptLines() []string {
+	s := m.activeSession()
+	if s == nil || len(s.Messages) == 0 {
+		return nil
+	}
+
 	lines := make([]string, 0, len(s.Messages))
 	for _, msg := range s.Messages {
 		formatted := formatMessageForTranscript(msg)
@@ -30,8 +56,12 @@ func (m Model) renderTranscript() string {
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
-	if len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
+	return lines
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-	return ui.BodyStyle.Width(max(m.Width-2, 50)).Render(strings.Join(lines, "\n"))
+	return b
 }
