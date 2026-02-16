@@ -6,6 +6,7 @@ type keyMap struct {
 	Quit      key.Binding
 	Submit    key.Binding
 	Backspace key.Binding
+	Complete  key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -19,6 +20,10 @@ func defaultKeyMap() keyMap {
 		),
 		Backspace: key.NewBinding(
 			key.WithKeys("backspace", "ctrl+h"),
+		),
+		Complete: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "autocomplete"),
 		),
 	}
 }

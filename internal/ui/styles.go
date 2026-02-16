@@ -18,6 +18,10 @@ var (
 			BorderForeground(lipgloss.Color("238")).
 			Padding(0, 1)
 
+	SuggestionStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("245")).
+			Padding(0, 1)
+
 	FooterStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241")).
 			Padding(0, 1)

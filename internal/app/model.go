@@ -37,6 +37,10 @@ type Model struct {
 	pending map[string]int
 
 	keys keyMap
+
+	completionPrefix  string
+	completionOptions []string
+	completionIndex   int
 }
 
 // NewModel returns the initial application state.
