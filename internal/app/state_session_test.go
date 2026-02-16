@@ -74,3 +74,41 @@ func TestAddRepoAcceptsRelativePath(t *testing.T) {
 		t.Fatalf("expected repo path %q, got %q", wantPath, gotPath)
 	}
 }
+
+func TestAddRepoEmptyPathUsesCWD(t *testing.T) {
+	m := NewModel(nil, config.Default())
+	m.runCommand(Command{Kind: "session.new", Session: "demo"})
+
+	tmp := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd failed: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+
+	if err := m.addRepoToActiveSession("", ""); err != nil {
+		t.Fatalf("add repo failed: %v", err)
+	}
+
+	repo := m.activeRepo()
+	if repo == nil {
+		t.Fatalf("expected active repo")
+	}
+
+	wantPath, err := filepath.EvalSymlinks(tmp)
+	if err != nil {
+		t.Fatalf("eval symlinks want failed: %v", err)
+	}
+	gotPath, err := filepath.EvalSymlinks(repo.Path)
+	if err != nil {
+		t.Fatalf("eval symlinks got failed: %v", err)
+	}
+	if gotPath != wantPath {
+		t.Fatalf("expected repo path %q, got %q", wantPath, gotPath)
+	}
+}

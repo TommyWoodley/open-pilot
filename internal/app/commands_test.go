@@ -28,3 +28,21 @@ func TestParseCommandInvalid(t *testing.T) {
 		t.Fatalf("expected parse error")
 	}
 }
+
+func TestParseCommandSessionAddRepoWithoutPath(t *testing.T) {
+	t.Parallel()
+
+	cmd, isCommand, err := ParseCommand("/session add-repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !isCommand {
+		t.Fatalf("expected command")
+	}
+	if cmd.Kind != "session.add-repo" {
+		t.Fatalf("unexpected kind: %q", cmd.Kind)
+	}
+	if cmd.RepoPath != "" {
+		t.Fatalf("expected empty repo path, got %q", cmd.RepoPath)
+	}
+}

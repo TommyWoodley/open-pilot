@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -52,6 +53,13 @@ func (m *Model) addRepoToActiveSession(path, label string) error {
 	s := m.activeSession()
 	if s == nil {
 		return fmt.Errorf("no active session")
+	}
+	if strings.TrimSpace(path) == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to resolve working directory: %w", err)
+		}
+		path = wd
 	}
 	normalized, err := normalizeRepoPath(path)
 	if err != nil {

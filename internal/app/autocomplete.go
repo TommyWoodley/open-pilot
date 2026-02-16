@@ -122,7 +122,7 @@ func (m *Model) commandSuggestions(input string) []string {
 		"/session new <name>",
 		"/session list",
 		"/session use <session-id>",
-		"/session add-repo <path> [label]",
+		"/session add-repo [path] [label]",
 		"/session repos",
 		"/session repo use <repo-id>",
 	}

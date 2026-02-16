@@ -48,6 +48,9 @@ func ParseCommand(input string) (Command, bool, error) {
 		if len(parts) == 3 && parts[1] == "use" {
 			return Command{Kind: "session.use", SessionID: parts[2]}, true, nil
 		}
+		if len(parts) == 2 && parts[1] == "add-repo" {
+			return Command{Kind: "session.add-repo", RepoPath: "", RepoLabel: ""}, true, nil
+		}
 		if len(parts) >= 3 && parts[1] == "add-repo" {
 			label := ""
 			if len(parts) > 3 {

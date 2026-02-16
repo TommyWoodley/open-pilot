@@ -64,7 +64,14 @@ func (m *Model) runCommand(cmd Command) {
 		m.addSystemMessage(helpText())
 	case "session.new":
 		s := m.createSession(cmd.Session)
-		m.addSystemMessage("Session " + s.ID + " created")
+		if pcfg, ok := m.cfg.Providers["codex"]; ok && pcfg.Command != "" {
+			s.ProviderID = "codex"
+			m.ProviderState = "starting"
+			m.addSystemMessage("Session " + s.ID + " created. Provider set to codex. Enter repo path.")
+		} else {
+			m.addSystemMessage("Session " + s.ID + " created. Codex provider config missing; set provider manually.")
+		}
+		m.Input = "/session add-repo "
 	case "session.list":
 		m.addSystemMessage(m.listSessionsText())
 	case "session.use":
@@ -121,10 +128,10 @@ func (m *Model) runCommand(cmd Command) {
 func helpText() string {
 	return strings.Join([]string{
 		"Commands:",
-		"/session new <name>",
+		"/session new <name> (auto-sets provider=codex and prompts repo step)",
 		"/session list",
 		"/session use <id>",
-		"/session add-repo <path> [label]",
+		"/session add-repo [path] [label] (empty path => current working directory)",
 		"/session repos",
 		"/session repo use <repo-id>",
 		"/provider use <codex|cursor>",

@@ -22,10 +22,10 @@ go build ./cmd/open-pilot
 
 ## Slash commands
 
-- `/session new <name>`
+- `/session new <name>` (auto-sets provider to `codex` and pre-fills repo setup)
 - `/session list`
 - `/session use <id>`
-- `/session add-repo <abs-path> [label]`
+- `/session add-repo [path] [label]` (empty path defaults to current working directory)
 - `/session repos`
 - `/session repo use <repo-id>`
 - `/provider use <codex|cursor>`
