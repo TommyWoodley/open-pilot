@@ -176,6 +176,11 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 
 	switch ev.Type {
 	case providers.EventReady:
+		if len(e.pending) > 0 {
+			// Initial provider-ready can arrive while a request is already in-flight.
+			// Keep busy state so streaming UX continues animating.
+			return
+		}
 		e.ProviderState = "ready"
 		if ev.Message != "" {
 			e.StatusText = ev.Message

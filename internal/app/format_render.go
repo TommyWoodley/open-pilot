@@ -5,17 +5,11 @@ import (
 	"strings"
 
 	"github.com/thwoodle/open-pilot/internal/core/format"
-	"github.com/thwoodle/open-pilot/internal/domain"
 	"github.com/thwoodle/open-pilot/internal/ui"
 )
 
-type renderedMessage = format.RenderedMessage
-
-func formatMessageForTranscript(msg domain.Message) renderedMessage {
-	return format.FormatMessageForTranscript(msg, transcriptStyles())
-}
-
-func transcriptStyles() format.Styles {
+func (m Model) transcriptStyles() format.Styles {
+	dots := m.generationDots()
 	return format.Styles{
 		UserPrefix: func(s string) string {
 			return ui.TranscriptUserPrefixStyle.Render(s)
@@ -60,6 +54,12 @@ func transcriptStyles() format.Styles {
 				content = ui.CodeBlockLangStyle.Render("["+lang+"]") + "\n" + content
 			}
 			return ui.CodeBlockStyle.Render(content)
+		},
+		StreamingPlaceholder: func() string {
+			return dots
+		},
+		StreamingSuffix: func() string {
+			return dots
 		},
 	}
 }

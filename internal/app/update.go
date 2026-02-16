@@ -72,6 +72,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.providerEvents != nil {
 			return m, waitProviderEvent(m.providerEvents)
 		}
+	case generationTickMsg:
+		if m.ProviderState == "busy" {
+			m.GeneratingTick = (m.GeneratingTick + 1) % 3
+		}
+		return m, generationTickCmd()
 	}
 
 	return m, nil

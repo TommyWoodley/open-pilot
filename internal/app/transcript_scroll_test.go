@@ -133,3 +133,18 @@ func TestAutoFollowBehaviorOnNewProviderMessage(t *testing.T) {
 		t.Fatalf("expected manual scroll position to remain stable, got %d", m.TranscriptScroll)
 	}
 }
+
+func TestGenerationTickDoesNotChangeManualScrollPosition(t *testing.T) {
+	t.Parallel()
+
+	m := buildScrollTestModel(8)
+	m.AutoFollowTranscript = false
+	m.TranscriptScroll = 3
+	m.ProviderState = "busy"
+
+	updated, _ := m.Update(generationTickMsg{})
+	m = updated.(Model)
+	if m.TranscriptScroll != 3 {
+		t.Fatalf("expected generation tick to keep manual scroll position, got %d", m.TranscriptScroll)
+	}
+}

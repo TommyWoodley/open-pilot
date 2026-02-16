@@ -64,3 +64,22 @@ func TestUpdateAcceptsSpaceInput(t *testing.T) {
 		t.Fatalf("expected space to be appended, got %q", nextModel.Input)
 	}
 }
+
+func TestGenerationTickAdvancesOnlyWhenBusy(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	m.ProviderState = "busy"
+	updated, _ := m.Update(generationTickMsg{})
+	nextModel := updated.(Model)
+	if nextModel.GeneratingTick != 1 {
+		t.Fatalf("expected tick to advance when busy, got %d", nextModel.GeneratingTick)
+	}
+
+	nextModel.ProviderState = "ready"
+	updated, _ = nextModel.Update(generationTickMsg{})
+	again := updated.(Model)
+	if again.GeneratingTick != 1 {
+		t.Fatalf("expected tick unchanged when not busy, got %d", again.GeneratingTick)
+	}
+}

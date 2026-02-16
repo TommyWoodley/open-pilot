@@ -12,18 +12,20 @@ type RenderedMessage struct {
 }
 
 type Styles struct {
-	UserPrefix   func(string) string
-	AgentPrefix  func(string) string
-	SystemPrefix func(string) string
-	Heading      func(string) string
-	List         func(string) string
-	Quote        func(string) string
-	Link         func(label, url string) string
-	InlineCode   func(string) string
-	Bold         func(string) string
-	Italic       func(string) string
-	Strike       func(string) string
-	CodeBlock    func(lang, text string) string
+	UserPrefix           func(string) string
+	AgentPrefix          func(string) string
+	SystemPrefix         func(string) string
+	Heading              func(string) string
+	List                 func(string) string
+	Quote                func(string) string
+	Link                 func(label, url string) string
+	InlineCode           func(string) string
+	Bold                 func(string) string
+	Italic               func(string) string
+	Strike               func(string) string
+	CodeBlock            func(lang, text string) string
+	StreamingPlaceholder func() string
+	StreamingSuffix      func() string
 }
 
 func FormatMessageForTranscript(msg domain.Message, styles Styles) RenderedMessage {
@@ -105,9 +107,17 @@ func FormatMessageForTranscript(msg domain.Message, styles Styles) RenderedMessa
 	body := strings.Join(lines, "\n")
 	if msg.Streaming {
 		if body == "" {
-			body = "..."
+			if styles.StreamingPlaceholder != nil {
+				body = styles.StreamingPlaceholder()
+			} else {
+				body = "..."
+			}
 		} else {
-			body += "\n..."
+			if styles.StreamingSuffix != nil {
+				body += "\n" + styles.StreamingSuffix()
+			} else {
+				body += "\n..."
+			}
 		}
 	}
 

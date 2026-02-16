@@ -124,3 +124,75 @@ func TestViewRendersLinkFallbackAndQuoteBlock(t *testing.T) {
 		}
 	}
 }
+
+func TestViewRendersDotsPlaceholderForEmptyStreamingMessage(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	s.Messages = append(s.Messages, domain.Message{
+		ID:        "msg-stream-1",
+		Role:      domain.RoleAssistant,
+		Content:   "",
+		Streaming: true,
+	})
+	m.Width = 100
+	m.Height = 24
+
+	m.GeneratingTick = 0
+	lines1 := m.buildTranscriptLines()
+	m.GeneratingTick = 1
+	lines2 := m.buildTranscriptLines()
+	m.GeneratingTick = 2
+	lines3 := m.buildTranscriptLines()
+
+	if len(lines1) == 0 || !strings.HasSuffix(lines1[0], ".") {
+		t.Fatalf("expected single-dot placeholder, got lines=%v", lines1)
+	}
+	if len(lines2) == 0 || !strings.HasSuffix(lines2[0], "..") {
+		t.Fatalf("expected two-dot placeholder, got lines=%v", lines2)
+	}
+	if len(lines3) == 0 || !strings.HasSuffix(lines3[0], "...") {
+		t.Fatalf("expected three-dot placeholder, got lines=%v", lines3)
+	}
+}
+
+func TestViewRendersDotsSuffixForStreamingMessageWithContent(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	s.Messages = append(s.Messages, domain.Message{
+		ID:        "msg-stream-2",
+		Role:      domain.RoleAssistant,
+		Content:   "partial text",
+		Streaming: true,
+	})
+	m.Width = 100
+	m.Height = 24
+	m.GeneratingTick = 2
+
+	lines := m.buildTranscriptLines()
+	if len(lines) < 2 || !strings.Contains(lines[0], "partial text") {
+		t.Fatalf("expected streamed content in transcript lines, got %v", lines)
+	}
+	if lines[1] != "..." {
+		t.Fatalf("expected animated suffix dots line, got %v", lines)
+	}
+}
+
+func TestStatusShowsDotsWhenBusy(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	m.ProviderState = "busy"
+	m.StatusText = "Sending prompt"
+	m.GeneratingTick = 1
+
+	status := m.renderStatus()
+	if !strings.Contains(status, "Sending prompt..") {
+		t.Fatalf("expected status dots while busy, got %q", status)
+	}
+}

@@ -39,7 +39,7 @@ func (m Model) buildTranscriptLines() []string {
 	if s == nil || len(s.Messages) == 0 {
 		return nil
 	}
-	return format.BuildTranscriptLines(s.Messages, transcriptStyles())
+	return format.BuildTranscriptLines(s.Messages, m.transcriptStyles())
 }
 
 func min(a, b int) int {

@@ -212,3 +212,34 @@ func TestParseMarkdownBlocksListWithQuoteMarkerStaysList(t *testing.T) {
 		t.Fatalf("expected list block, got %q", blocks[0].Kind)
 	}
 }
+
+func TestStreamingPlaceholderCallbackUsedForEmptyStreamingMessage(t *testing.T) {
+	msg := domain.Message{Role: domain.RoleAssistant, Streaming: true}
+	rendered := FormatMessageForTranscript(msg, Styles{
+		StreamingPlaceholder: func() string { return ".." },
+	})
+	if rendered.Body != ".." {
+		t.Fatalf("expected placeholder callback output, got %q", rendered.Body)
+	}
+}
+
+func TestStreamingSuffixCallbackUsedForStreamingWithContent(t *testing.T) {
+	msg := domain.Message{Role: domain.RoleAssistant, Content: "hello", Streaming: true}
+	rendered := FormatMessageForTranscript(msg, Styles{
+		StreamingSuffix: func() string { return "..." },
+	})
+	if !strings.Contains(rendered.Body, "hello\n...") {
+		t.Fatalf("expected streaming suffix callback output, got %q", rendered.Body)
+	}
+}
+
+func TestNoStreamingCallbacksOnFinalizedMessage(t *testing.T) {
+	msg := domain.Message{Role: domain.RoleAssistant, Content: "done", Streaming: false}
+	rendered := FormatMessageForTranscript(msg, Styles{
+		StreamingPlaceholder: func() string { return "X" },
+		StreamingSuffix:      func() string { return "Y" },
+	})
+	if rendered.Body != "done" {
+		t.Fatalf("expected finalized body unchanged, got %q", rendered.Body)
+	}
+}

@@ -91,3 +91,23 @@ func TestRunCommandProviderStatus(t *testing.T) {
 		t.Fatalf("expected provider status text, got %q", eng.StatusText)
 	}
 }
+
+func TestHandleProviderReadyDoesNotClearBusyWhenPendingRequestExists(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	idx := store.AppendAssistantStreaming("codex", "repo-1")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	eng.pending["req-1"] = pendingRef{SessionID: s.ID, Index: idx}
+	eng.ProviderState = "busy"
+	eng.StatusText = "Sending prompt..."
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventReady,
+		SessionID: s.ID,
+		Message:   "provider ready",
+	})
+
+	if eng.ProviderState != "busy" {
+		t.Fatalf("expected provider state to remain busy while pending, got %q", eng.ProviderState)
+	}
+}

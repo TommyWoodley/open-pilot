@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/thwoodle/open-pilot/internal/config"
 	coreautocomplete "github.com/thwoodle/open-pilot/internal/core/autocomplete"
@@ -30,8 +31,9 @@ type Model struct {
 
 	providerEvents <-chan providers.Event
 
-	ProviderState string
-	StatusText    string
+	ProviderState  string
+	StatusText     string
+	GeneratingTick int
 
 	keys keyMap
 
@@ -49,6 +51,7 @@ func NewModel(manager providers.Manager, cfg config.Config) Model {
 		providerEvents:       chat.ProviderEvents(),
 		ProviderState:        chat.ProviderState,
 		StatusText:           chat.StatusText,
+		GeneratingTick:       0,
 		keys:                 defaultKeyMap(),
 		TranscriptScroll:     0,
 		AutoFollowTranscript: true,
@@ -60,10 +63,12 @@ func NewModel(manager providers.Manager, cfg config.Config) Model {
 
 // Init performs startup work.
 func (m Model) Init() tea.Cmd {
-	if m.providerEvents == nil {
-		return nil
+	cmds := make([]tea.Cmd, 0, 2)
+	if m.providerEvents != nil {
+		cmds = append(cmds, waitProviderEvent(m.providerEvents))
 	}
-	return waitProviderEvent(m.providerEvents)
+	cmds = append(cmds, generationTickCmd())
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) shutdownProviders(ctx context.Context) {
@@ -93,5 +98,24 @@ func (m *Model) clampTranscriptScroll() {
 	}
 	if m.TranscriptScroll == 0 {
 		m.AutoFollowTranscript = true
+	}
+}
+
+type generationTickMsg struct{}
+
+func generationTickCmd() tea.Cmd {
+	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg {
+		return generationTickMsg{}
+	})
+}
+
+func (m Model) generationDots() string {
+	switch m.GeneratingTick % 3 {
+	case 0:
+		return "."
+	case 1:
+		return ".."
+	default:
+		return "..."
 	}
 }

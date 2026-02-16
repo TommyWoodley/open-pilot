@@ -23,6 +23,10 @@ func (m Model) renderStatus() string {
 			repo = r.Label
 		}
 	}
-	text := fmt.Sprintf("session=%s provider=%s repo=%s state=%s | %s | ↑/↓ scroll PgUp/PgDn Home/End", session, provider, repo, m.ProviderState, m.StatusText)
+	statusText := m.StatusText
+	if m.ProviderState == "busy" {
+		statusText += m.generationDots()
+	}
+	text := fmt.Sprintf("session=%s provider=%s repo=%s state=%s | %s | ↑/↓ scroll PgUp/PgDn Home/End", session, provider, repo, m.ProviderState, statusText)
 	return ui.FooterStyle.Render(text)
 }
