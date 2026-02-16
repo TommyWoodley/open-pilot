@@ -51,8 +51,8 @@ func (m *Model) handleProviderEvent(ev providers.Event) {
 	case providers.EventError:
 		m.ProviderState = "error"
 		errText := ev.Message
-		if ev.Err != nil {
-			errText += ": " + ev.Err.Error()
+		if errText == "" && ev.Err != nil {
+			errText = ev.Err.Error()
 		}
 		s.Messages = append(s.Messages, domain.Message{
 			ID:        m.nextMessageID("msg"),

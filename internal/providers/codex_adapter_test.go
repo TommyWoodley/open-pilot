@@ -1,7 +1,12 @@
 package providers
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/thwoodle/open-pilot/internal/config"
 )
@@ -27,5 +32,260 @@ func TestManagerUsesBuiltInCodexAdapter(t *testing.T) {
 	}
 	if codexAdapter.binary != "codex" {
 		t.Fatalf("expected codex binary fallback, got %q", codexAdapter.binary)
+	}
+}
+
+func TestCodexAdapterFirstPromptStoresThreadID(t *testing.T) {
+	env := setupFakeCodex(t, "success", "thread-first", "hello from assistant")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-1", SessionID: "sess-1", RepoPath: env.repoDir, Text: "hello"}); err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	ev := waitEventType(t, events, EventFinal)
+	if ev.Text != "hello from assistant" {
+		t.Fatalf("expected clean assistant text, got %q", ev.Text)
+	}
+
+	adapter.mu.Lock()
+	h := adapter.handles[handle]
+	adapter.mu.Unlock()
+	if h == nil {
+		t.Fatalf("expected active handle")
+	}
+	h.mu.Lock()
+	got := h.codexID
+	h.mu.Unlock()
+	if got != "thread-first" {
+		t.Fatalf("expected thread ID thread-first, got %q", got)
+	}
+}
+
+func TestCodexAdapterSubsequentPromptUsesResume(t *testing.T) {
+	env := setupFakeCodex(t, "success", "thread-resume", "ok")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-1", SessionID: "sess-1", RepoPath: env.repoDir, Text: "first prompt"}); err != nil {
+		t.Fatalf("send #1 failed: %v", err)
+	}
+	_ = waitEventType(t, events, EventFinal)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-2", SessionID: "sess-1", RepoPath: env.repoDir, Text: "second prompt"}); err != nil {
+		t.Fatalf("send #2 failed: %v", err)
+	}
+	_ = waitEventType(t, events, EventFinal)
+
+	raw, err := os.ReadFile(env.argsFile)
+	if err != nil {
+		t.Fatalf("read args file failed: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 invocations, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "exec --json") || !strings.Contains(lines[0], "--output-last-message") {
+		t.Fatalf("expected first call to be plain exec with output-last-message, got %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "--skip-git-repo-check") {
+		t.Fatalf("expected first call to include skip-git-repo-check, got %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "exec resume --json") {
+		t.Fatalf("expected second call to use resume, got %q", lines[1])
+	}
+	if !strings.Contains(lines[1], "--skip-git-repo-check") {
+		t.Fatalf("expected second call to include skip-git-repo-check, got %q", lines[1])
+	}
+	if strings.Contains(lines[1], "--output-last-message") {
+		t.Fatalf("expected resume call to omit output-last-message, got %q", lines[1])
+	}
+	if !strings.Contains(lines[1], "thread-resume second prompt") {
+		t.Fatalf("expected resume call to include thread id and prompt, got %q", lines[1])
+	}
+}
+
+func TestCodexAdapterFailureEmitsSingleConciseError(t *testing.T) {
+	env := setupFakeCodex(t, "fail", "", "")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-1", SessionID: "sess-1", RepoPath: env.repoDir, Text: "hello"}); err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	ev := waitEventType(t, events, EventError)
+	if ev.Message != "network down" {
+		t.Fatalf("expected concise turn.failed message, got %q", ev.Message)
+	}
+	if strings.Contains(strings.ToLower(ev.Message), "reconnecting") {
+		t.Fatalf("unexpected reconnect noise in error: %q", ev.Message)
+	}
+}
+
+func TestCodexAdapterNoFinalMessageEmitsError(t *testing.T) {
+	env := setupFakeCodex(t, "empty", "thread-empty", "")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-1", SessionID: "sess-1", RepoPath: env.repoDir, Text: "hello"}); err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	ev := waitEventType(t, events, EventError)
+	if ev.Message != "codex returned no assistant message" {
+		t.Fatalf("unexpected error message: %q", ev.Message)
+	}
+}
+
+func TestCodexAdapterStreamsPreviewChunks(t *testing.T) {
+	env := setupFakeCodex(t, "stream", "thread-stream", "hello world")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-1", SessionID: "sess-1", RepoPath: env.repoDir, Text: "hello"}); err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	chunk1 := waitEventType(t, events, EventChunk)
+	chunk2 := waitEventType(t, events, EventChunk)
+	final := waitEventType(t, events, EventFinal)
+
+	if chunk1.Text+chunk2.Text != "hello world" {
+		t.Fatalf("expected preview chunks to build full text, got %q + %q", chunk1.Text, chunk2.Text)
+	}
+	if final.Text != "hello world" {
+		t.Fatalf("expected final clean text, got %q", final.Text)
+	}
+}
+
+func TestCodexAdapterFailureFallsBackToStderrMessage(t *testing.T) {
+	env := setupFakeCodex(t, "fail_stderr", "", "")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-1", SessionID: "sess-1", RepoPath: env.repoDir, Text: "hello"}); err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	ev := waitEventType(t, events, EventError)
+	if ev.Message != "authentication required; run codex login" {
+		t.Fatalf("expected stderr fallback message, got %q", ev.Message)
+	}
+}
+
+type fakeCodexEnv struct {
+	binary   string
+	repoDir  string
+	argsFile string
+}
+
+func setupFakeCodex(t *testing.T, mode, threadID, message string) fakeCodexEnv {
+	t.Helper()
+
+	tmp := t.TempDir()
+	argsFile := filepath.Join(tmp, "args.log")
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.Mkdir(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo failed: %v", err)
+	}
+
+	script := filepath.Join(tmp, "fake-codex")
+	content := `#!/usr/bin/env bash
+set -eu
+if [ -n "${OPEN_PILOT_ARGS_FILE:-}" ]; then
+  printf '%s\n' "$*" >> "$OPEN_PILOT_ARGS_FILE"
+fi
+out_file=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output-last-message" ]; then
+    out_file="$arg"
+  fi
+  prev="$arg"
+done
+mode="${OPEN_PILOT_MODE:-success}"
+thread_id="${OPEN_PILOT_THREAD_ID:-thread-123}"
+last_message="${OPEN_PILOT_LAST_MESSAGE:-hello}"
+if [ "$mode" = "success" ]; then
+  printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
+  printf '{"type":"response.output_text.delta","delta":"%s"}\n' "$last_message"
+  if [ -n "$out_file" ]; then
+    printf '%s' "$last_message" > "$out_file"
+  fi
+  exit 0
+fi
+if [ "$mode" = "fail" ]; then
+  printf '{"type":"error","message":"Reconnecting... 1/5"}\n'
+  printf '{"type":"turn.failed","error":{"message":"network down"}}\n'
+  exit 1
+fi
+if [ "$mode" = "empty" ]; then
+  printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
+  : > "$out_file"
+  exit 0
+fi
+if [ "$mode" = "stream" ]; then
+  printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
+  printf '{"type":"response.output_text.delta","delta":"hello "}\n'
+  printf '{"type":"response.output_text.delta","delta":"world"}\n'
+  printf '%s' "$last_message" > "$out_file"
+  exit 0
+fi
+if [ "$mode" = "fail_stderr" ]; then
+  printf 'authentication required; run codex login\n' >&2
+  exit 1
+fi
+printf 'unknown mode: %s\n' "$mode" >&2
+exit 2
+`
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatalf("write fake codex script failed: %v", err)
+	}
+
+	t.Setenv("OPEN_PILOT_MODE", mode)
+	t.Setenv("OPEN_PILOT_THREAD_ID", threadID)
+	t.Setenv("OPEN_PILOT_LAST_MESSAGE", message)
+	t.Setenv("OPEN_PILOT_ARGS_FILE", argsFile)
+
+	return fakeCodexEnv{binary: script, repoDir: repoDir, argsFile: argsFile}
+}
+
+func startHandle(t *testing.T, adapter *codexCLIAdapter, repoDir string) (SessionHandle, <-chan Event) {
+	t.Helper()
+
+	handle, err := adapter.Start(context.Background(), StartRequest{SessionID: "sess-1", Provider: "codex", RepoPath: repoDir})
+	if err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+	events := adapter.Events(handle)
+	_ = waitEventType(t, events, EventReady)
+	return handle, events
+}
+
+func waitEventType(t *testing.T, events <-chan Event, eventType string) Event {
+	t.Helper()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-timer.C:
+			t.Fatalf("timed out waiting for event %q", eventType)
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatalf("event channel closed while waiting for %q", eventType)
+			}
+			if ev.Type == eventType {
+				return ev
+			}
+		}
 	}
 }

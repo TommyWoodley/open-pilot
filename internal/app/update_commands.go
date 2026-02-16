@@ -144,7 +144,9 @@ func (m *Model) finalizeRequest(requestID, text string) {
 		return
 	}
 	msg := s.Messages[idx]
-	msg.Content += text
+	if strings.TrimSpace(text) != "" {
+		msg.Content = text
+	}
 	msg.Streaming = false
 	s.Messages[idx] = msg
 	delete(m.pending, requestID)

@@ -36,3 +36,9 @@ go build ./cmd/open-pilot
 
 Codex is now built in (no wrapper required).  
 For wrapper-based providers (such as Cursor), see `/Users/thwoodle/Desktop/open-pilot/internal/providers/wrappers/README.md` for the NDJSON contract.
+
+## Codex behavior
+
+- Uses built-in Codex adapter (no separate codex wrapper binary).
+- Reuses the same Codex thread per open-pilot session/provider/repo context.
+- Transcript shows assistant content only; Codex CLI metadata/log noise is suppressed.
