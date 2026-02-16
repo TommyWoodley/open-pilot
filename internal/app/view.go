@@ -9,16 +9,11 @@ import (
 // View renders the top-level application layout.
 func (m Model) View() string {
 	header := ui.HeaderStyle.Render("open-pilot")
+	chat := m.renderTranscript()
+	input := ui.InputStyle.Width(max(m.Width-2, 50)).Render("> " + m.Input)
+	status := m.renderStatus()
 
-	bodyText := "Waiting for agent session..."
-	if m.StatusText != "" {
-		bodyText = fmt.Sprintf("Status: %s", m.StatusText)
-	}
-	body := ui.BodyStyle.Width(max(m.Width, 50)).Render(bodyText)
-
-	footer := ui.FooterStyle.Render("q quit")
-
-	return fmt.Sprintf("%s\n\n%s\n\n%s", header, body, footer)
+	return fmt.Sprintf("%s\n\n%s\n\n%s\n%s", header, chat, input, status)
 }
 
 func max(a, b int) int {

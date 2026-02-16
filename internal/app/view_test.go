@@ -3,19 +3,21 @@ package app
 import (
 	"strings"
 	"testing"
+
+	"github.com/thwoodle/open-pilot/internal/config"
 )
 
 func TestViewContainsCoreSections(t *testing.T) {
 	t.Parallel()
 
-	m := NewModel()
+	m := NewModel(nil, config.Default())
 	m.Width = 80
 	view := m.View()
 
 	checks := []string{
 		"open-pilot",
-		"Status:",
-		"q quit",
+		"session=none",
+		"> ",
 	}
 
 	for _, expected := range checks {
