@@ -1,13 +1,12 @@
 # open-pilot
 
-`open-pilot` is a Go-based TUI for interacting with coding-agent CLIs through provider wrappers.
+`open-pilot` is a Go-based TUI for interacting with coding-agent CLIs.
 
 ## Prerequisites
 
 - Go 1.24+
-- Provider wrapper commands available on `PATH`:
-  - `open-pilot-codex-wrapper`
-  - `open-pilot-cursor-wrapper` (or override with your own command)
+- `codex` CLI available on `PATH` and authenticated (`codex login`)
+- Optional: provider wrapper commands for non-Codex providers (for example `open-pilot-cursor-wrapper`)
 
 ## Run
 
@@ -35,4 +34,5 @@ go build ./cmd/open-pilot
 
 ## Wrapper protocol
 
-See `/Users/thwoodle/Desktop/open-pilot/internal/providers/wrappers/README.md` for NDJSON contract details.
+Codex is now built in (no wrapper required).  
+For wrapper-based providers (such as Cursor), see `/Users/thwoodle/Desktop/open-pilot/internal/providers/wrappers/README.md` for the NDJSON contract.

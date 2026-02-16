@@ -124,7 +124,7 @@ func helpText() string {
 		"/session new <name>",
 		"/session list",
 		"/session use <id>",
-		"/session add-repo <abs-path> [label]",
+		"/session add-repo <path> [label]",
 		"/session repos",
 		"/session repo use <repo-id>",
 		"/provider use <codex|cursor>",

@@ -61,7 +61,7 @@ func ParseCommand(input string) (Command, bool, error) {
 		if len(parts) == 4 && parts[1] == "repo" && parts[2] == "use" {
 			return Command{Kind: "session.repo.use", RepoID: parts[3]}, true, nil
 		}
-		return Command{}, true, errors.New("usage: /session <new|list|use|add-repo|repos|repo use>")
+		return Command{}, true, errors.New("usage: /session <new|list|use|add-repo <path>|repos|repo use>")
 	default:
 		return Command{}, true, errors.New("unknown command; run /help")
 	}

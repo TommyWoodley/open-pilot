@@ -8,7 +8,7 @@ func Default() Config {
 		Providers: map[string]ProviderConfig{
 			"codex": {
 				ID:             "codex",
-				Command:        "open-pilot-codex-wrapper",
+				Command:        "codex",
 				Args:           nil,
 				Env:            map[string]string{},
 				StartupTimeout: 10 * time.Second,

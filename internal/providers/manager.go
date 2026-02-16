@@ -134,7 +134,16 @@ func (s *service) adapterForLocked(providerID string) (Adapter, config.ProviderC
 		return adapter, cfg, nil
 	}
 	cfg.ID = providerID
-	adapter := newProcessAdapter(cfg)
+	var adapter Adapter
+	if providerID == "codex" {
+		binary := cfg.Command
+		if binary == "" || binary == "open-pilot-codex-wrapper" {
+			binary = "codex"
+		}
+		adapter = newCodexCLIAdapter(binary)
+	} else {
+		adapter = newProcessAdapter(cfg)
+	}
 	s.adapters[providerID] = adapter
 	return adapter, cfg, nil
 }
