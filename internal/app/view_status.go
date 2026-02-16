@@ -11,8 +11,14 @@ func (m Model) renderStatus() string {
 	provider := "none"
 	repo := "none"
 	if s := m.activeSession(); s != nil {
-		session = s.ID
-		provider = s.ProviderID
+		if s.Name != "" {
+			session = s.Name
+		} else {
+			session = s.ID
+		}
+		if s.ProviderID != "" {
+			provider = s.ProviderID
+		}
 		if r := m.activeRepo(); r != nil {
 			repo = r.Label
 		}

@@ -21,7 +21,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Input = m.Input[:len(m.Input)-1]
 			}
 		default:
-			if msg.Type == tea.KeyRunes {
+			if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
 				m.Input += msg.String()
 			}
 		}

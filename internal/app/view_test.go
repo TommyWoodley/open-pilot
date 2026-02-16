@@ -26,3 +26,16 @@ func TestViewContainsCoreSections(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusShowsSessionName(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("my-session-name")
+	m.ActiveSessionID = s.ID
+
+	view := m.View()
+	if !strings.Contains(view, "session=my-session-name") {
+		t.Fatalf("expected status to include session name, got: %s", view)
+	}
+}

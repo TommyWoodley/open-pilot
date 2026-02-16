@@ -59,3 +59,20 @@ func TestPromptBlockedWithoutSession(t *testing.T) {
 		t.Fatalf("expected status message when prompt is blocked")
 	}
 }
+
+func TestUpdateAcceptsSpaceInput(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	m.Input = "/provider"
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	nextModel, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("expected Model type from Update")
+	}
+
+	if nextModel.Input != "/provider " {
+		t.Fatalf("expected space to be appended, got %q", nextModel.Input)
+	}
+}
