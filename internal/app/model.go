@@ -2,14 +2,11 @@ package app
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strconv"
-	"time"
 
 	"github.com/thwoodle/open-pilot/internal/config"
-	"github.com/thwoodle/open-pilot/internal/domain"
+	coreautocomplete "github.com/thwoodle/open-pilot/internal/core/autocomplete"
+	corechat "github.com/thwoodle/open-pilot/internal/core/chat"
+	coresession "github.com/thwoodle/open-pilot/internal/core/session"
 	"github.com/thwoodle/open-pilot/internal/providers"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,49 +20,40 @@ type Model struct {
 
 	Input string
 
-	Sessions        map[string]*domain.Session
-	SessionOrder    []string
+	store        *coresession.Store
+	chat         *corechat.Engine
+	autocomplete coreautocomplete.Engine
+
+	// Compatibility fields retained for legacy tests/callers.
 	ActiveSessionID string
+	pending         map[string]int
+
+	providerEvents <-chan providers.Event
 
 	ProviderState string
 	StatusText    string
 
-	manager        providers.Manager
-	cfg            config.Config
-	providerEvents <-chan providers.Event
-
-	nextID  int
-	pending map[string]int
-
 	keys keyMap
 
-	TranscriptScroll                int
-	AutoFollowTranscript            bool
-	lastRenderedTranscriptLineCount int
-
-	completionPrefix  string
-	completionOptions []string
-	completionIndex   int
+	TranscriptScroll     int
+	AutoFollowTranscript bool
 }
 
 // NewModel returns the initial application state.
 func NewModel(manager providers.Manager, cfg config.Config) Model {
+	store := coresession.NewStore()
+	chat := corechat.NewEngine(store, manager, cfg)
 	m := Model{
-		StatusText:                      "No agent connected",
-		ProviderState:                   "disconnected",
-		Sessions:                        make(map[string]*domain.Session),
-		SessionOrder:                    make([]string, 0),
-		manager:                         manager,
-		cfg:                             cfg,
-		nextID:                          1,
-		pending:                         make(map[string]int),
-		keys:                            defaultKeyMap(),
-		TranscriptScroll:                0,
-		AutoFollowTranscript:            true,
-		lastRenderedTranscriptLineCount: 0,
-	}
-	if manager != nil {
-		m.providerEvents = manager.Events()
+		store:                store,
+		chat:                 chat,
+		providerEvents:       chat.ProviderEvents(),
+		ProviderState:        chat.ProviderState,
+		StatusText:           chat.StatusText,
+		keys:                 defaultKeyMap(),
+		TranscriptScroll:     0,
+		AutoFollowTranscript: true,
+		ActiveSessionID:      store.ActiveSessionID,
+		pending:              make(map[string]int),
 	}
 	return m
 }
@@ -78,45 +66,8 @@ func (m Model) Init() tea.Cmd {
 	return waitProviderEvent(m.providerEvents)
 }
 
-func (m *Model) activeSession() *domain.Session {
-	if m.ActiveSessionID == "" {
-		return nil
-	}
-	return m.Sessions[m.ActiveSessionID]
-}
-
-func (m *Model) nextMessageID(prefix string) string {
-	id := prefix + "-" + strconv.Itoa(m.nextID)
-	m.nextID++
-	return id
-}
-
-func now() time.Time {
-	return time.Now()
-}
-
-func normalizeRepoPath(path string) (string, error) {
-	if path == "" {
-		return "", fmt.Errorf("repo path cannot be empty")
-	}
-	if !filepath.IsAbs(path) {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("failed to resolve working directory: %w", err)
-		}
-		path = filepath.Join(wd, path)
-	}
-	return filepath.Clean(path), nil
-}
-
 func (m *Model) shutdownProviders(ctx context.Context) {
-	if m.manager == nil {
-		return
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	_ = m.manager.StopAll(ctx)
+	m.chat.StopAll(ctx)
 }
 
 func (m Model) transcriptVisibleLines() int {

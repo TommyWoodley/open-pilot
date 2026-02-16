@@ -1,59 +1,43 @@
 package app
 
 import (
-	"strings"
-
+	"github.com/thwoodle/open-pilot/internal/core/format"
 	"github.com/thwoodle/open-pilot/internal/domain"
 	"github.com/thwoodle/open-pilot/internal/ui"
 )
 
-type renderedMessage struct {
-	Prefix string
-	Body   string
-}
+type renderedMessage = format.RenderedMessage
 
 func formatMessageForTranscript(msg domain.Message) renderedMessage {
-	prefix := "[system]"
-	prefixStyle := ui.TranscriptSystemPrefixStyle
-	switch msg.Role {
-	case domain.RoleUser:
-		prefix = "[you]"
-		prefixStyle = ui.TranscriptUserPrefixStyle
-	case domain.RoleAssistant:
-		prefix = "[agent]"
-		prefixStyle = ui.TranscriptAgentPrefixStyle
-	}
+	return format.FormatMessageForTranscript(msg, transcriptStyles())
+}
 
-	blocks := parseMarkdownBlocks(msg.Content, msg.Streaming)
-	lines := make([]string, 0, len(blocks)+1)
-	for _, block := range blocks {
-		switch block.Kind {
-		case mdBlockParagraph:
-			for _, l := range strings.Split(block.Text, "\n") {
-				lines = append(lines, renderInlineCode(l))
+func transcriptStyles() format.Styles {
+	return format.Styles{
+		UserPrefix: func(s string) string {
+			return ui.TranscriptUserPrefixStyle.Render(s)
+		},
+		AgentPrefix: func(s string) string {
+			return ui.TranscriptAgentPrefixStyle.Render(s)
+		},
+		SystemPrefix: func(s string) string {
+			return ui.TranscriptSystemPrefixStyle.Render(s)
+		},
+		Heading: func(s string) string {
+			return ui.MarkdownHeadingStyle.Render(s)
+		},
+		List: func(s string) string {
+			return ui.MarkdownListStyle.Render(s)
+		},
+		InlineCode: func(s string) string {
+			return ui.InlineCodeStyle.Render(s)
+		},
+		CodeBlock: func(lang, text string) string {
+			content := text
+			if lang != "" {
+				content = ui.CodeBlockLangStyle.Render("["+lang+"]") + "\n" + content
 			}
-		case mdBlockHeading:
-			lines = append(lines, ui.MarkdownHeadingStyle.Render(renderInlineCode(block.Text)))
-		case mdBlockList:
-			lines = append(lines, ui.MarkdownListStyle.Render(renderInlineCode(block.Text)))
-		case mdBlockCode:
-			lines = append(lines, renderCodeBlock(block))
-		case mdBlockBlank:
-			lines = append(lines, "")
-		}
-	}
-
-	body := strings.Join(lines, "\n")
-	if msg.Streaming {
-		if body == "" {
-			body = "..."
-		} else {
-			body += "\n..."
-		}
-	}
-
-	return renderedMessage{
-		Prefix: prefixStyle.Render(prefix),
-		Body:   body,
+			return ui.CodeBlockStyle.Render(content)
+		},
 	}
 }

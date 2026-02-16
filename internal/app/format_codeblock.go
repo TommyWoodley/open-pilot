@@ -1,8 +1,7 @@
 package app
 
 import (
-	"strings"
-
+	coreformat "github.com/thwoodle/open-pilot/internal/core/format"
 	"github.com/thwoodle/open-pilot/internal/ui"
 )
 
@@ -16,20 +15,7 @@ func renderCodeBlock(block mdBlock) string {
 }
 
 func renderInlineCode(text string) string {
-	if !strings.Contains(text, "`") {
-		return text
-	}
-	parts := strings.Split(text, "`")
-	if len(parts) < 3 {
-		return text
-	}
-	var b strings.Builder
-	for i, part := range parts {
-		if i%2 == 1 {
-			b.WriteString(ui.InlineCodeStyle.Render(part))
-		} else {
-			b.WriteString(part)
-		}
-	}
-	return b.String()
+	return coreformat.RenderInlineCode(text, func(s string) string {
+		return ui.InlineCodeStyle.Render(s)
+	})
 }

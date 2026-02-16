@@ -1,21 +1,40 @@
-package app
+package autocomplete
 
 import (
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/thwoodle/open-pilot/internal/core/command"
 )
 
-func (m *Model) applyAutocomplete() {
-	raw := strings.TrimLeft(m.Input, " \t")
+type Engine struct {
+	completionPrefix  string
+	completionOptions []string
+	completionIndex   int
+}
+
+type Options struct {
+	SessionIDs []string
+	RepoIDs    []string
+}
+
+func (e *Engine) Reset() {
+	e.completionPrefix = ""
+	e.completionOptions = nil
+	e.completionIndex = 0
+}
+
+func (e *Engine) Apply(input string, opt Options) string {
+	raw := strings.TrimLeft(input, " \t")
 	if !strings.HasPrefix(raw, "/") {
-		return
+		return input
 	}
 
 	tokens, trailing := splitTokens(raw)
 	if len(tokens) == 0 {
-		return
+		return input
 	}
 
 	if trailing {
@@ -25,115 +44,48 @@ func (m *Model) applyAutocomplete() {
 	context := tokens[:idx]
 	current := tokens[idx]
 
-	options := m.tokenOptionsForContext(context, current)
+	options := tokenOptionsForContext(context, current, opt)
 	if len(options) == 0 {
-		return
+		return input
 	}
 
 	contextKey := strings.Join(context, "\x00") + "\x00" + current
-	if m.completionPrefix != contextKey || !equalStrings(m.completionOptions, options) {
-		m.completionPrefix = contextKey
-		m.completionOptions = options
+	if e.completionPrefix != contextKey || !equalStrings(e.completionOptions, options) {
+		e.completionPrefix = contextKey
+		e.completionOptions = options
 		start := firstMatchingIndex(options, current)
 		if start < 0 {
 			start = 0
 		}
-		m.completionIndex = start
+		e.completionIndex = start
 	}
 
-	if len(m.completionOptions) == 0 {
-		return
+	if len(e.completionOptions) == 0 {
+		return input
 	}
-	if m.completionIndex >= len(m.completionOptions) {
-		m.completionIndex = 0
+	if e.completionIndex >= len(e.completionOptions) {
+		e.completionIndex = 0
 	}
 
-	chosen := m.completionOptions[m.completionIndex]
-	m.completionIndex = (m.completionIndex + 1) % len(m.completionOptions)
+	chosen := e.completionOptions[e.completionIndex]
+	e.completionIndex = (e.completionIndex + 1) % len(e.completionOptions)
 
 	tokens[idx] = chosen
-	m.Input = strings.Join(tokens, " ") + " "
+	return strings.Join(tokens, " ") + " "
 }
 
-func (m *Model) resetAutocomplete() {
-	m.completionPrefix = ""
-	m.completionOptions = nil
-	m.completionIndex = 0
-}
-
-func (m *Model) tokenOptionsForContext(context []string, current string) []string {
-	switch len(context) {
-	case 0:
-		return []string{"/help", "/provider", "/session"}
-	case 1:
-		switch context[0] {
-		case "/provider":
-			return []string{"status", "use"}
-		case "/session":
-			return []string{"add-repo", "list", "new", "repo", "repos", "use"}
-		}
-	case 2:
-		if context[0] == "/provider" && context[1] == "use" {
-			return []string{"codex", "cursor"}
-		}
-		if context[0] == "/session" && context[1] == "use" {
-			ids := make([]string, 0, len(m.SessionOrder))
-			for _, id := range m.SessionOrder {
-				ids = append(ids, id)
-			}
-			sort.Strings(ids)
-			return ids
-		}
-		if context[0] == "/session" && context[1] == "repo" {
-			return []string{"use"}
-		}
-		if context[0] == "/session" && context[1] == "add-repo" {
-			return pathCompletionOptions(current)
-		}
-	case 3:
-		if context[0] == "/session" && context[1] == "repo" && context[2] == "use" {
-			s := m.activeSession()
-			if s == nil {
-				return nil
-			}
-			ids := make([]string, 0, len(s.Repos))
-			for _, repo := range s.Repos {
-				ids = append(ids, repo.ID)
-			}
-			sort.Strings(ids)
-			return ids
-		}
-	}
-
-	return nil
-}
-
-func (m *Model) commandSuggestions(input string) []string {
+func (e *Engine) Suggestions(input string, opt Options) []string {
 	raw := strings.TrimLeft(input, " \t")
 	if !strings.HasPrefix(raw, "/") {
 		return nil
 	}
 
-	candidates := []string{
-		"/help",
-		"/provider status",
-		"/provider use codex",
-		"/provider use cursor",
-		"/session new <name>",
-		"/session list",
-		"/session use <session-id>",
-		"/session add-repo [path] [label]",
-		"/session repos",
-		"/session repo use <repo-id>",
-	}
-
-	for _, id := range m.SessionOrder {
+	candidates := append([]string{}, command.BaseSuggestions()...)
+	for _, id := range opt.SessionIDs {
 		candidates = append(candidates, "/session use "+id)
 	}
-	if s := m.activeSession(); s != nil {
-		for _, repo := range s.Repos {
-			candidates = append(candidates, "/session repo use "+repo.ID)
-		}
+	for _, repoID := range opt.RepoIDs {
+		candidates = append(candidates, "/session repo use "+repoID)
 	}
 
 	if strings.HasPrefix(raw, "/session add-repo ") {
@@ -149,9 +101,43 @@ func (m *Model) commandSuggestions(input string) []string {
 			filtered = append(filtered, c)
 		}
 	}
+	return command.SortAndDedupe(filtered)
+}
 
-	sort.Strings(filtered)
-	return dedupeStrings(filtered)
+func tokenOptionsForContext(context []string, current string, opt Options) []string {
+	switch len(context) {
+	case 0:
+		return command.RootSuggestions()
+	case 1:
+		switch context[0] {
+		case "/provider":
+			return []string{"status", "use"}
+		case "/session":
+			return []string{"add-repo", "list", "new", "repo", "repos", "use"}
+		}
+	case 2:
+		if context[0] == "/provider" && context[1] == "use" {
+			return []string{"codex", "cursor"}
+		}
+		if context[0] == "/session" && context[1] == "use" {
+			ids := append([]string{}, opt.SessionIDs...)
+			sort.Strings(ids)
+			return ids
+		}
+		if context[0] == "/session" && context[1] == "repo" {
+			return []string{"use"}
+		}
+		if context[0] == "/session" && context[1] == "add-repo" {
+			return pathCompletionOptions(current)
+		}
+	case 3:
+		if context[0] == "/session" && context[1] == "repo" && context[2] == "use" {
+			ids := append([]string{}, opt.RepoIDs...)
+			sort.Strings(ids)
+			return ids
+		}
+	}
+	return nil
 }
 
 func pathCompletionOptions(current string) []string {
@@ -251,19 +237,6 @@ func firstMatchingIndex(options []string, prefix string) int {
 		}
 	}
 	return -1
-}
-
-func dedupeStrings(values []string) []string {
-	if len(values) == 0 {
-		return values
-	}
-	out := []string{values[0]}
-	for i := 1; i < len(values); i++ {
-		if values[i] != values[i-1] {
-			out = append(out, values[i])
-		}
-	}
-	return out
 }
 
 func equalStrings(a, b []string) bool {

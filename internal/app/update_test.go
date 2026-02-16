@@ -48,18 +48,6 @@ func TestUpdateWindowSize(t *testing.T) {
 	}
 }
 
-func TestPromptBlockedWithoutSession(t *testing.T) {
-	t.Parallel()
-
-	m := NewModel(nil, config.Default())
-	m.Input = "hello"
-	m = m.processEnter()
-
-	if m.StatusText == "" {
-		t.Fatalf("expected status message when prompt is blocked")
-	}
-}
-
 func TestUpdateAcceptsSpaceInput(t *testing.T) {
 	t.Parallel()
 

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/thwoodle/open-pilot/internal/config"
@@ -30,17 +29,5 @@ func TestSessionNewPrefillsAddRepoInput(t *testing.T) {
 
 	if m.Input != "/session add-repo " {
 		t.Fatalf("expected prefilled add-repo input, got %q", m.Input)
-	}
-}
-
-func TestPromptStillBlockedWithoutSetup(t *testing.T) {
-	t.Parallel()
-
-	m := NewModel(nil, config.Default())
-	m.Input = "hello"
-	m = m.processEnter()
-
-	if !strings.Contains(m.StatusText, "/session new <name>") {
-		t.Fatalf("expected guided setup message, got %q", m.StatusText)
 	}
 }

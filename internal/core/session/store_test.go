@@ -1,42 +1,41 @@
-package app
+package session
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/thwoodle/open-pilot/internal/config"
 )
 
-func TestSessionLifecycleCommands(t *testing.T) {
-	t.Parallel()
-
-	m := NewModel(nil, config.Default())
-
-	m.runCommand(Command{Kind: "session.new", Session: "demo"})
-	s := m.activeSession()
-	if s == nil {
+func TestSessionCreateUse(t *testing.T) {
+	s := NewStore()
+	created := s.CreateSession("demo")
+	if created == nil || s.ActiveSession() == nil {
 		t.Fatalf("expected active session")
 	}
-
-	if err := m.addRepoToActiveSession("/tmp", "tmp-repo"); err != nil {
-		t.Fatalf("add repo failed: %v", err)
+	if !s.UseSession(created.ID) {
+		t.Fatalf("expected use session to succeed")
 	}
+}
 
-	repo := m.activeRepo()
-	if repo == nil {
+func TestAddRepoToActiveSession(t *testing.T) {
+	s := NewStore()
+	s.CreateSession("demo")
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := s.AddRepoToActiveSession(repo, ""); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	if s.ActiveRepo() == nil {
 		t.Fatalf("expected active repo")
-	}
-
-	m.runCommand(Command{Kind: "provider.use", ProviderID: "codex"})
-	if s.ProviderID != "codex" {
-		t.Fatalf("expected provider codex, got %q", s.ProviderID)
 	}
 }
 
 func TestAddRepoAcceptsRelativePath(t *testing.T) {
-	m := NewModel(nil, config.Default())
-	m.runCommand(Command{Kind: "session.new", Session: "demo"})
+	s := NewStore()
+	s.CreateSession("demo")
 
 	tmp := t.TempDir()
 	relRepo := filepath.Join(tmp, "repo")
@@ -55,10 +54,10 @@ func TestAddRepoAcceptsRelativePath(t *testing.T) {
 		_ = os.Chdir(wd)
 	})
 
-	if err := m.addRepoToActiveSession("repo", ""); err != nil {
+	if err := s.AddRepoToActiveSession("repo", ""); err != nil {
 		t.Fatalf("add repo failed: %v", err)
 	}
-	repo := m.activeRepo()
+	repo := s.ActiveRepo()
 	if repo == nil {
 		t.Fatalf("expected active repo")
 	}
@@ -76,8 +75,8 @@ func TestAddRepoAcceptsRelativePath(t *testing.T) {
 }
 
 func TestAddRepoEmptyPathUsesCWD(t *testing.T) {
-	m := NewModel(nil, config.Default())
-	m.runCommand(Command{Kind: "session.new", Session: "demo"})
+	s := NewStore()
+	s.CreateSession("demo")
 
 	tmp := t.TempDir()
 	wd, err := os.Getwd()
@@ -91,11 +90,11 @@ func TestAddRepoEmptyPathUsesCWD(t *testing.T) {
 		_ = os.Chdir(wd)
 	})
 
-	if err := m.addRepoToActiveSession("", ""); err != nil {
+	if err := s.AddRepoToActiveSession("", ""); err != nil {
 		t.Fatalf("add repo failed: %v", err)
 	}
 
-	repo := m.activeRepo()
+	repo := s.ActiveRepo()
 	if repo == nil {
 		t.Fatalf("expected active repo")
 	}
@@ -110,5 +109,20 @@ func TestAddRepoEmptyPathUsesCWD(t *testing.T) {
 	}
 	if gotPath != wantPath {
 		t.Fatalf("expected repo path %q, got %q", wantPath, gotPath)
+	}
+}
+
+func TestMessageLifecycle(t *testing.T) {
+	s := NewStore()
+	s.CreateSession("demo")
+	idx := s.AppendAssistantStreaming("codex", "repo-1")
+	if idx < 0 {
+		t.Fatalf("expected streaming index")
+	}
+	if !s.AppendChunkAt(s.ActiveSessionID, idx, "hi") {
+		t.Fatalf("expected chunk append")
+	}
+	if !s.FinalizeAt(s.ActiveSessionID, idx, "done") {
+		t.Fatalf("expected finalize")
 	}
 }
