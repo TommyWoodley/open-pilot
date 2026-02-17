@@ -266,14 +266,15 @@ func TestCommandAndReasoningEventsAppearInTranscript(t *testing.T) {
 	view := m.View()
 	checks := []string{
 		"[agent-thought] Planning project type detection",
-		"Command completed (exit=0): go test ./...",
-		"Command output:",
-		"ok package/a",
+		"Ran go test ./... for",
 	}
 	for _, expected := range checks {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("expected transcript to contain %q, got: %s", expected, view)
 		}
+	}
+	if strings.Contains(view, "Command output:") || strings.Contains(view, "ok package/a") {
+		t.Fatalf("did not expect verbose command output in transcript, got: %s", view)
 	}
 }
 

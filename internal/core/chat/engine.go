@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/thwoodle/open-pilot/internal/config"
@@ -23,6 +24,18 @@ type pendingRef struct {
 	Index     int
 }
 
+type itemRef struct {
+	SessionID string
+	ItemID    string
+}
+
+type commandRunState struct {
+	startedAt  time.Time
+	command    string
+	lastOutput string
+	status     string
+}
+
 type Engine struct {
 	Store         *session.Store
 	Manager       ProviderManager
@@ -31,7 +44,9 @@ type Engine struct {
 	StatusText    string
 	pending       map[string]pendingRef
 	itemRefs      map[string]pendingRef
+	commandRuns   map[itemRef]commandRunState
 	unknownSeen   map[string]struct{}
+	nowFn         func() time.Time
 }
 
 func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config) *Engine {
@@ -43,7 +58,9 @@ func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config)
 		StatusText:    "No agent connected",
 		pending:       make(map[string]pendingRef),
 		itemRefs:      make(map[string]pendingRef),
+		commandRuns:   make(map[itemRef]commandRunState),
 		unknownSeen:   make(map[string]struct{}),
+		nowFn:         time.Now,
 	}
 }
 
@@ -299,29 +316,66 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 }
 
 func (e *Engine) handleCommandExecutionEvent(sessionID string, ev providers.Event) {
-	cmd := strings.TrimSpace(ev.Command)
-	if cmd == "" {
-		cmd = "(unknown command)"
-	}
 	status := strings.ToLower(strings.TrimSpace(ev.CommandStatus))
-	var content string
-	switch status {
-	case "in_progress":
-		content = "Running command: " + cmd
-	case "failed":
-		content = fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd)
-	default:
-		if ev.CommandExitCode != nil && *ev.CommandExitCode != 0 {
-			content = fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd)
-		} else {
-			content = fmt.Sprintf("Command completed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd)
+	now := e.nowFn()
+	ref := itemRef{SessionID: sessionID, ItemID: strings.TrimSpace(ev.ItemID)}
+
+	state := commandRunState{
+		startedAt:  now,
+		command:    strings.TrimSpace(ev.Command),
+		lastOutput: strings.TrimSpace(ev.CommandOutput),
+		status:     status,
+	}
+	if ref.ItemID != "" {
+		if existing, ok := e.commandRuns[ref]; ok {
+			state = existing
 		}
+		if state.startedAt.IsZero() {
+			state.startedAt = now
+		}
+		if cmd := strings.TrimSpace(ev.Command); cmd != "" {
+			state.command = cmd
+		}
+		if out := strings.TrimSpace(ev.CommandOutput); out != "" {
+			state.lastOutput = out
+		}
+		if status != "" {
+			state.status = status
+		}
+		e.commandRuns[ref] = state
 	}
-	if out := summarizeCommandOutput(ev.CommandOutput, 8, 500); out != "" {
-		content += "\nCommand output:\n" + out
+	if strings.TrimSpace(state.command) == "" {
+		state.command = "(unknown command)"
 	}
-	if strings.TrimSpace(ev.ItemID) != "" {
-		e.upsertItemMessage(sessionID, ev.ItemID, content)
+
+	displayCommand := shortenCommand(state.command, 120)
+	if status == "in_progress" {
+		content := renderCommandRunning(displayCommand)
+		if ref.ItemID != "" {
+			e.upsertItemMessage(sessionID, ref.ItemID, content)
+			return
+		}
+		e.Store.AddAssistantMessage(sessionID, content)
+		return
+	}
+
+	duration := formatDuration(state.startedAt, now)
+	failed := status == "failed"
+	if !failed && ev.CommandExitCode != nil && *ev.CommandExitCode != 0 {
+		failed = true
+	}
+
+	summary := renderCommandSummary(displayCommand, duration, classifyCommand(state.command) == "explored", failed, ev.CommandExitCode)
+	var content string
+	if failed {
+		teaser := extractErrorTeaser(state.lastOutput)
+		content = renderCommandFailed(summary, teaser)
+	} else {
+		content = renderCommandCompleted(summary)
+	}
+	if ref.ItemID != "" {
+		delete(e.commandRuns, ref)
+		e.upsertItemMessage(sessionID, ref.ItemID, content)
 		return
 	}
 	e.Store.AddAssistantMessage(sessionID, content)
@@ -343,6 +397,131 @@ func (e *Engine) upsertItemMessage(sessionID, itemID, content string) {
 
 func itemRefKey(sessionID, itemID string) string {
 	return sessionID + "|" + itemID
+}
+
+func renderCommandRunning(command string) string {
+	return fmt.Sprintf("Running `%s` ...", escapeInlineCode(command))
+}
+
+func renderCommandCompleted(summary string) string {
+	return summary
+}
+
+func renderCommandFailed(summary, teaser string) string {
+	if strings.TrimSpace(teaser) == "" {
+		return summary
+	}
+	return summary + "\nError: " + teaser
+}
+
+func renderCommandSummary(command, duration string, explored, failed bool, exitCode *int) string {
+	var line string
+	if explored {
+		line = fmt.Sprintf("Explored for %s", duration)
+	} else {
+		line = fmt.Sprintf("Ran `%s` for %s", escapeInlineCode(command), duration)
+	}
+	if failed {
+		line += fmt.Sprintf(" (failed, exit=%s)", formatExitCode(exitCode))
+	}
+	return line
+}
+
+func shortenCommand(command string, maxChars int) string {
+	normalized := normalizeShellWrappedCommand(command)
+	normalized = strings.Join(strings.Fields(strings.TrimSpace(normalized)), " ")
+	if normalized == "" {
+		return "(unknown command)"
+	}
+	return truncateRunes(normalized, maxChars)
+}
+
+func normalizeShellWrappedCommand(command string) string {
+	trimmed := strings.TrimSpace(command)
+	prefixes := []string{"/bin/bash -lc ", "bash -lc ", "sh -lc ", "/bin/sh -lc "}
+	for _, p := range prefixes {
+		if strings.HasPrefix(trimmed, p) {
+			inner := strings.TrimSpace(strings.TrimPrefix(trimmed, p))
+			if len(inner) >= 2 {
+				if (inner[0] == '\'' && inner[len(inner)-1] == '\'') || (inner[0] == '"' && inner[len(inner)-1] == '"') {
+					return inner[1 : len(inner)-1]
+				}
+			}
+			return inner
+		}
+	}
+	return trimmed
+}
+
+func escapeInlineCode(s string) string {
+	return strings.ReplaceAll(s, "`", "'")
+}
+
+func formatDuration(startedAt, finishedAt time.Time) string {
+	if startedAt.IsZero() || finishedAt.Before(startedAt) {
+		return "0s"
+	}
+	d := finishedAt.Sub(startedAt)
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	if d < time.Minute {
+		sec := float64(d.Milliseconds()) / 1000.0
+		return fmt.Sprintf("%.1fs", sec)
+	}
+	return d.Round(time.Second).String()
+}
+
+func classifyCommand(command string) string {
+	normalized := strings.ToLower(normalizeShellWrappedCommand(command))
+	segments := splitCommandSegments(normalized)
+	if len(segments) == 0 {
+		return "ran"
+	}
+	isExploreSegment := func(segment string) bool {
+		fields := strings.Fields(strings.TrimSpace(segment))
+		if len(fields) == 0 {
+			return true
+		}
+		switch fields[0] {
+		case "ls", "find", "rg", "fd", "tree", "pwd", "cat", "head", "tail", "du", "wc", "stat", "which":
+			return true
+		case "sed":
+			return true
+		default:
+			return false
+		}
+	}
+	for _, segment := range segments {
+		if !isExploreSegment(segment) {
+			return "ran"
+		}
+	}
+	return "explored"
+}
+
+func splitCommandSegments(command string) []string {
+	replaced := strings.NewReplacer("&&", ";", "||", ";", "|", ";", "\n", ";").Replace(command)
+	parts := strings.Split(replaced, ";")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func extractErrorTeaser(output string) string {
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		return truncateRunes(strings.Join(strings.Fields(line), " "), 180)
+	}
+	return ""
 }
 
 func (e *Engine) clearPendingPlaceholder(requestID, sessionID string) {

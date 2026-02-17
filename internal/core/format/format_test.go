@@ -274,9 +274,8 @@ func TestNoStreamingCallbacksOnFinalizedMessage(t *testing.T) {
 
 func TestAgentMetaMarkersUseAgentMetaStyle(t *testing.T) {
 	msg := domain.Message{
-		Role: domain.RoleAssistant,
-		Content: "[agent-thought] planning\nRunning command: ls\nCommand completed (exit=0): ls\n" +
-			"Command output:\nfile-a\nfile-b",
+		Role:    domain.RoleAssistant,
+		Content: "[agent-thought] planning\nRunning ls ...\nExplored ls for 100ms\nError: permission denied",
 	}
 	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{
 		AgentMeta: func(s string) string { return "<m>" + s + "</m>" },
@@ -284,11 +283,9 @@ func TestAgentMetaMarkersUseAgentMetaStyle(t *testing.T) {
 	joined := strings.Join(lines, "\n")
 	checks := []string{
 		"<m>[agent-thought] planning</m>",
-		"<m>Running command: ls</m>",
-		"<m>Command completed (exit=0): ls</m>",
-		"<m>Command output:</m>",
-		"<m>file-a</m>",
-		"<m>file-b</m>",
+		"<m>Running ls ...</m>",
+		"<m>Explored ls for 100ms</m>",
+		"<m>Error: permission denied</m>",
 	}
 	for _, c := range checks {
 		if !strings.Contains(joined, c) {

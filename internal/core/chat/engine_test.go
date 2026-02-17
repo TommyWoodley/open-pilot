@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/thwoodle/open-pilot/internal/config"
 	"github.com/thwoodle/open-pilot/internal/core/command"
@@ -203,17 +204,22 @@ func TestHandleProviderCommandLifecycleAndOutput(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
 	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	start := time.Unix(1000, 0)
+	eng.nowFn = func() time.Time { return start }
 
 	eng.HandleProviderEvent(providers.Event{
 		Type:          providers.EventCommandExecution,
 		SessionID:     s.ID,
+		ItemID:        "item-c",
 		Command:       "go test ./...",
 		CommandStatus: "in_progress",
 	})
+	eng.nowFn = func() time.Time { return start.Add(1200 * time.Millisecond) }
 	zero := 0
 	eng.HandleProviderEvent(providers.Event{
 		Type:            providers.EventCommandExecution,
 		SessionID:       s.ID,
+		ItemID:          "item-c",
 		Command:         "go test ./...",
 		CommandStatus:   "completed",
 		CommandExitCode: &zero,
@@ -221,19 +227,18 @@ func TestHandleProviderCommandLifecycleAndOutput(t *testing.T) {
 	})
 
 	msgs := store.ActiveSession().Messages
-	all := make([]string, 0, len(msgs))
-	for _, m := range msgs {
-		all = append(all, m.Content)
+	if len(msgs) != 1 {
+		t.Fatalf("expected one upserted command message, got %d", len(msgs))
 	}
-	joined := strings.Join(all, "\n")
-	if !strings.Contains(joined, "Running command: go test ./...") {
-		t.Fatalf("expected running command message, got %q", joined)
-	}
-	if !strings.Contains(joined, "Command completed (exit=0): go test ./...") {
+	joined := msgs[0].Content
+	if !strings.Contains(joined, "Ran `go test ./...` for 1.2s") {
 		t.Fatalf("expected completed command message, got %q", joined)
 	}
-	if !strings.Contains(joined, "Command output:\nok package/a\nok package/b") {
-		t.Fatalf("expected command output summary, got %q", joined)
+	if strings.Contains(joined, "Running ") {
+		t.Fatalf("expected running line to be replaced by final summary, got %q", joined)
+	}
+	if strings.Contains(joined, "Command output:") || strings.Contains(joined, "ok package/a") {
+		t.Fatalf("did not expect verbose command output in transcript, got %q", joined)
 	}
 }
 
@@ -247,6 +252,7 @@ func TestHandleProviderCommandOutputTruncation(t *testing.T) {
 	eng.HandleProviderEvent(providers.Event{
 		Type:            providers.EventCommandExecution,
 		SessionID:       s.ID,
+		ItemID:          "item-fail",
 		Command:         "echo test",
 		CommandStatus:   "failed",
 		CommandExitCode: &one,
@@ -258,8 +264,8 @@ func TestHandleProviderCommandOutputTruncation(t *testing.T) {
 		t.Fatalf("expected command message")
 	}
 	last := msgs[len(msgs)-1].Content
-	if !strings.Contains(last, "... (truncated)") {
-		t.Fatalf("expected truncated marker in command output, got %q", last)
+	if !strings.Contains(last, "failed") || !strings.Contains(last, "Error: line") {
+		t.Fatalf("expected failed summary with teaser, got %q", last)
 	}
 }
 
@@ -291,11 +297,11 @@ func TestHandleProviderCommandExecutionUpsertsByItemID(t *testing.T) {
 		t.Fatalf("expected one upserted message for same item id, got %d", len(msgs))
 	}
 	got := msgs[0].Content
-	if !strings.Contains(got, "Command completed (exit=0): go test ./...") {
+	if !strings.Contains(got, "Ran `go test ./...` for") {
 		t.Fatalf("expected completed command content, got %q", got)
 	}
-	if !strings.Contains(got, "Command output:\nok package/a") {
-		t.Fatalf("expected command output in same message, got %q", got)
+	if strings.Contains(got, "Command output:") || strings.Contains(got, "ok package/a") {
+		t.Fatalf("did not expect full command output in summary message, got %q", got)
 	}
 }
 
@@ -360,6 +366,43 @@ func TestHandleProviderAgentMessageClearsPendingPlaceholderAndUsesItemID(t *test
 	}
 	if _, ok := eng.pending["req-1"]; ok {
 		t.Fatalf("expected pending request to be cleared after itemized message flow")
+	}
+}
+
+func TestHandleProviderCommandExecutionUsesExploredSummaryForDiscoveryCommands(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	start := time.Unix(1000, 0)
+	eng.nowFn = func() time.Time { return start }
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:          providers.EventCommandExecution,
+		SessionID:     s.ID,
+		ItemID:        "item-ls",
+		Command:       "/bin/bash -lc 'ls -la && rg --files'",
+		CommandStatus: "in_progress",
+	})
+	eng.nowFn = func() time.Time { return start.Add(400 * time.Millisecond) }
+	zero := 0
+	eng.HandleProviderEvent(providers.Event{
+		Type:            providers.EventCommandExecution,
+		SessionID:       s.ID,
+		ItemID:          "item-ls",
+		Command:         "/bin/bash -lc 'ls -la && rg --files'",
+		CommandStatus:   "completed",
+		CommandExitCode: &zero,
+	})
+
+	msgs := store.ActiveSession().Messages
+	if len(msgs) != 1 {
+		t.Fatalf("expected single upserted message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "Explored for 400ms") {
+		t.Fatalf("expected explored summary, got %q", msgs[0].Content)
+	}
+	if strings.Contains(msgs[0].Content, "ls -la") || strings.Contains(msgs[0].Content, "rg --files") {
+		t.Fatalf("did not expect explored summary to include command text, got %q", msgs[0].Content)
 	}
 }
 

@@ -170,6 +170,13 @@ func classifyAgentMetaLines(msg domain.Message, bodyLines []string) []bool {
 		trimmed := strings.TrimLeft(line, " ")
 		switch {
 		case strings.HasPrefix(trimmed, "[agent-thought]"),
+			strings.HasPrefix(trimmed, "Running `"),
+			strings.HasPrefix(trimmed, "Running "),
+			strings.HasPrefix(trimmed, "Ran `"),
+			strings.HasPrefix(trimmed, "Ran "),
+			strings.HasPrefix(trimmed, "Explored `"),
+			strings.HasPrefix(trimmed, "Explored "),
+			strings.HasPrefix(trimmed, "Error:"),
 			strings.HasPrefix(trimmed, "Running command:"),
 			strings.HasPrefix(trimmed, "Command completed"),
 			strings.HasPrefix(trimmed, "Command failed"),
