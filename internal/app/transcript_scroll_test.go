@@ -148,3 +148,50 @@ func TestGenerationTickDoesNotChangeManualScrollPosition(t *testing.T) {
 		t.Fatalf("expected generation tick to keep manual scroll position, got %d", m.TranscriptScroll)
 	}
 }
+
+func TestTrackpadScrollWheelUpAndDown(t *testing.T) {
+	t.Parallel()
+
+	m := buildScrollTestModel(12)
+
+	updated, _ := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonWheelUp,
+	})
+	m = updated.(Model)
+	if m.TranscriptScroll == 0 {
+		t.Fatalf("expected wheel up to increase transcript scroll")
+	}
+	if m.AutoFollowTranscript {
+		t.Fatalf("expected auto-follow off after wheel up")
+	}
+
+	updated, _ = m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonWheelDown,
+	})
+	m = updated.(Model)
+	if m.TranscriptScroll < 0 {
+		t.Fatalf("expected non-negative transcript scroll, got %d", m.TranscriptScroll)
+	}
+}
+
+func TestTrackpadScrollDownRestoresAutoFollowAtBottom(t *testing.T) {
+	t.Parallel()
+
+	m := buildScrollTestModel(12)
+	m.TranscriptScroll = 1
+	m.AutoFollowTranscript = false
+
+	updated, _ := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonWheelDown,
+	})
+	m = updated.(Model)
+	if m.TranscriptScroll != 0 {
+		t.Fatalf("expected wheel down to return to bottom, got %d", m.TranscriptScroll)
+	}
+	if !m.AutoFollowTranscript {
+		t.Fatalf("expected auto-follow to be re-enabled at bottom")
+	}
+}

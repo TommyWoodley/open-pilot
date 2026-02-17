@@ -67,6 +67,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Width = msg.Width
 		m.Height = msg.Height
 		m.Ready = true
+	case tea.MouseMsg:
+		switch {
+		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp:
+			m.TranscriptScroll++
+			m.AutoFollowTranscript = false
+			m.clampTranscriptScroll()
+			return m, nil
+		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelDown:
+			m.TranscriptScroll--
+			if m.TranscriptScroll <= 0 {
+				m.TranscriptScroll = 0
+				m.AutoFollowTranscript = true
+			}
+			return m, nil
+		}
 	case providerEventMsg:
 		m.handleProviderEvent(msg.event)
 		if m.providerEvents != nil {
