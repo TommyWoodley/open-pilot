@@ -1,9 +1,11 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/thwoodle/open-pilot/internal/config"
 	"github.com/thwoodle/open-pilot/internal/domain"
 	"github.com/thwoodle/open-pilot/internal/providers"
@@ -269,5 +271,27 @@ func TestCommandAndReasoningEventsAppearInTranscript(t *testing.T) {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("expected transcript to contain %q, got: %s", expected, view)
 		}
+	}
+}
+
+func TestViewFitsConfiguredHeight(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	m.Width = 120
+	m.Height = 24
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	for i := 0; i < 60; i++ {
+		s.Messages = append(s.Messages, domain.Message{
+			ID:      fmt.Sprintf("msg-fit-%d", i),
+			Role:    domain.RoleAssistant,
+			Content: "line",
+		})
+	}
+
+	view := m.View()
+	if h := lipgloss.Height(view); h > m.Height {
+		t.Fatalf("expected rendered view height <= %d, got %d", m.Height, h)
 	}
 }
