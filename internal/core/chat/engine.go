@@ -38,6 +38,28 @@ type commandRunState struct {
 	status     string
 }
 
+const hooksRunningReason = "running"
+
+type HookEventType string
+
+const (
+	HookEventProgress HookEventType = "progress"
+	HookEventDone     HookEventType = "done"
+)
+
+type HookEvent struct {
+	Type      HookEventType
+	SessionID string
+	Update    corehooks.ProgressUpdate
+	Result    corehooks.RunResult
+}
+
+type hookProgressState struct {
+	progressID string
+	hookIDs    []string
+	statuses   map[string]string
+}
+
 type Engine struct {
 	Store         *session.Store
 	Manager       ProviderManager
@@ -48,6 +70,9 @@ type Engine struct {
 	pending       map[string]pendingRef
 	itemRefs      map[string]pendingRef
 	commandRuns   map[itemRef]commandRunState
+	hookProgress  map[string]hookProgressState
+	hookEvents    chan HookEvent
+	asyncHookRuns bool
 	unknownSeen   map[string]struct{}
 	nowFn         func() time.Time
 }
@@ -63,9 +88,17 @@ func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config)
 		pending:       make(map[string]pendingRef),
 		itemRefs:      make(map[string]pendingRef),
 		commandRuns:   make(map[itemRef]commandRunState),
+		hookProgress:  make(map[string]hookProgressState),
 		unknownSeen:   make(map[string]struct{}),
 		nowFn:         time.Now,
 	}
+}
+
+func (e *Engine) EnableAsyncHooks() {
+	if e.hookEvents == nil {
+		e.hookEvents = make(chan HookEvent, 256)
+	}
+	e.asyncHookRuns = true
 }
 
 func (e *Engine) ProcessInput(input string) {
@@ -104,6 +137,11 @@ func (e *Engine) SendPrompt(input string) {
 		reason := strings.TrimSpace(s.HooksBlockReason)
 		if reason == "" {
 			reason = "startup hooks failed"
+		}
+		if reason == hooksRunningReason {
+			e.AddSystemMessage("Hooks are still running for this session. Please wait for completion.")
+			e.StatusText = "Running hooks..."
+			return
 		}
 		e.AddSystemMessage("Prompts blocked for this session until hooks pass. Run /hooks run after fixes. Last error: " + reason)
 		e.StatusText = "Hooks blocked"
@@ -252,6 +290,14 @@ func (e *Engine) runHooks(s *domain.Session, trigger config.HookTrigger, repoPat
 		s.LastHookRunAt = e.nowFn()
 		return
 	}
+	if e.asyncHookRuns {
+		e.runHooksAsync(s, trigger, repoPath)
+		return
+	}
+	e.runHooksSync(s, trigger, repoPath)
+}
+
+func (e *Engine) runHooksSync(s *domain.Session, trigger config.HookTrigger, repoPath string) {
 	hookDefs := e.Config.BuiltinHooks.HooksFor(trigger)
 	hookIDs := make([]string, 0, len(hookDefs))
 	for _, hook := range hookDefs {
@@ -265,46 +311,34 @@ func (e *Engine) runHooks(s *domain.Session, trigger config.HookTrigger, repoPat
 		return
 	}
 	progressID := e.Store.NextID("hooks-progress")
-	renderProgress := func(completed int, statuses map[string]string, runningID string) {
-		lines := []string{fmt.Sprintf("[[pilot-divider:Hooks %d/%d]]", completed, len(hookIDs))}
-		for _, id := range hookIDs {
-			status := statuses[id]
-			if status == "" {
-				status = "pending"
-			}
-			if id == runningID && status == "pending" {
-				status = "running"
-			}
-			lines = append(lines, fmt.Sprintf("%s: %s", id, status))
-		}
-		lines = append(lines, "[[pilot-divider:]]")
-		e.upsertItemMessageWithRole(s.ID, progressID, strings.Join(lines, "\n"), domain.RoleSystem)
+	state := hookProgressState{
+		progressID: progressID,
+		hookIDs:    hookIDs,
+		statuses:   make(map[string]string, len(hookIDs)),
 	}
-	statuses := make(map[string]string, len(hookIDs))
-	runningID := ""
 	e.StatusText = "Running hooks..."
-	renderProgress(0, statuses, runningID)
+	e.renderHookProgress(s.ID, state, 0, "")
 	onUpdate := func(update corehooks.ProgressUpdate) {
 		if strings.TrimSpace(update.HookID) == "" {
 			return
 		}
 		switch update.Status {
 		case "running":
-			statuses[update.HookID] = "running"
-			renderProgress(update.Completed, statuses, update.HookID)
+			state.statuses[update.HookID] = "running"
+			e.renderHookProgress(s.ID, state, update.Completed, update.HookID)
 		case "passed":
-			statuses[update.HookID] = "passed"
-			renderProgress(update.Completed, statuses, "")
+			state.statuses[update.HookID] = "passed"
+			e.renderHookProgress(s.ID, state, update.Completed, "")
 		default:
-			statuses[update.HookID] = "failed (" + update.Status + ")"
-			renderProgress(update.Completed, statuses, "")
+			state.statuses[update.HookID] = "failed (" + update.Status + ")"
+			e.renderHookProgress(s.ID, state, update.Completed, "")
 		}
 	}
 	result := e.Hooks.Run(context.Background(), trigger, s.ID, repoPath, onUpdate)
 	s.LastHookRunAt = e.nowFn()
 	if !result.Passed && result.FailedHookID != "" && result.FailedCommandIndex > 0 {
-		statuses[result.FailedHookID] = fmt.Sprintf("failed (command %d, %s)", result.FailedCommandIndex, result.Reason)
-		renderProgress(len(result.PerHookResults), statuses, "")
+		state.statuses[result.FailedHookID] = fmt.Sprintf("failed (command %d, %s)", result.FailedCommandIndex, result.Reason)
+		e.renderHookProgress(s.ID, state, len(result.PerHookResults), "")
 	}
 	if result.Passed {
 		s.HooksBlocked = false
@@ -323,6 +357,137 @@ func (e *Engine) runHooks(s *domain.Session, trigger config.HookTrigger, repoPat
 	s.HooksBlockReason = reason
 	e.AddSystemMessage("Prompts blocked for this session until hooks pass. Run /hooks run after fixes.")
 	e.StatusText = "Hooks blocked"
+}
+
+func (e *Engine) runHooksAsync(s *domain.Session, trigger config.HookTrigger, repoPath string) {
+	hookDefs := e.Config.BuiltinHooks.HooksFor(trigger)
+	hookIDs := make([]string, 0, len(hookDefs))
+	for _, hook := range hookDefs {
+		hookIDs = append(hookIDs, hook.ID)
+	}
+	if len(hookIDs) == 0 {
+		if strings.TrimSpace(e.Config.BuiltinHooksLoadError) == "" {
+			s.HooksBlocked = false
+			s.HooksBlockReason = ""
+			s.LastHookRunAt = e.nowFn()
+			e.StatusText = "Hooks passed"
+		} else {
+			s.HooksBlocked = true
+			s.HooksBlockReason = e.Config.BuiltinHooksLoadError
+			e.StatusText = "Hooks blocked"
+			e.AddSystemMessage("Prompts blocked for this session until hooks pass. Run /hooks run after fixes.")
+		}
+		return
+	}
+
+	state := hookProgressState{
+		progressID: e.Store.NextID("hooks-progress"),
+		hookIDs:    hookIDs,
+		statuses:   make(map[string]string, len(hookIDs)),
+	}
+	e.hookProgress[s.ID] = state
+	s.HooksBlocked = true
+	s.HooksBlockReason = hooksRunningReason
+	e.StatusText = "Running hooks..."
+	e.renderHookProgress(s.ID, state, 0, "")
+
+	go func(sessionID string) {
+		onUpdate := func(update corehooks.ProgressUpdate) {
+			e.emitHookEvent(HookEvent{
+				Type:      HookEventProgress,
+				SessionID: sessionID,
+				Update:    update,
+			})
+		}
+		result := e.Hooks.Run(context.Background(), trigger, sessionID, repoPath, onUpdate)
+		e.emitHookEvent(HookEvent{
+			Type:      HookEventDone,
+			SessionID: sessionID,
+			Result:    result,
+		})
+	}(s.ID)
+}
+
+func (e *Engine) renderHookProgress(sessionID string, state hookProgressState, completed int, runningID string) {
+	lines := []string{fmt.Sprintf("[[pilot-divider:Hooks %d/%d]]", completed, len(state.hookIDs))}
+	for _, id := range state.hookIDs {
+		status := state.statuses[id]
+		if status == "" {
+			status = "pending"
+		}
+		if id == runningID && status == "pending" {
+			status = "running"
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s", id, status))
+	}
+	lines = append(lines, "[[pilot-divider:]]")
+	e.upsertItemMessageWithRole(sessionID, state.progressID, strings.Join(lines, "\n"), domain.RoleSystem)
+}
+
+func (e *Engine) emitHookEvent(ev HookEvent) {
+	if e.hookEvents == nil {
+		return
+	}
+	select {
+	case e.hookEvents <- ev:
+	default:
+	}
+}
+
+func (e *Engine) HandleHookEvent(ev HookEvent) {
+	s := e.Store.Sessions[ev.SessionID]
+	if s == nil {
+		return
+	}
+	state, ok := e.hookProgress[ev.SessionID]
+	if !ok {
+		return
+	}
+	switch ev.Type {
+	case HookEventProgress:
+		update := ev.Update
+		if strings.TrimSpace(update.HookID) == "" {
+			return
+		}
+		switch update.Status {
+		case "running":
+			state.statuses[update.HookID] = "running"
+			e.renderHookProgress(ev.SessionID, state, update.Completed, update.HookID)
+		case "passed":
+			state.statuses[update.HookID] = "passed"
+			e.renderHookProgress(ev.SessionID, state, update.Completed, "")
+		default:
+			state.statuses[update.HookID] = "failed (" + update.Status + ")"
+			e.renderHookProgress(ev.SessionID, state, update.Completed, "")
+		}
+		e.hookProgress[ev.SessionID] = state
+		e.StatusText = "Running hooks..."
+	case HookEventDone:
+		result := ev.Result
+		if !result.Passed && result.FailedHookID != "" && result.FailedCommandIndex > 0 {
+			state.statuses[result.FailedHookID] = fmt.Sprintf("failed (command %d, %s)", result.FailedCommandIndex, result.Reason)
+		}
+		e.renderHookProgress(ev.SessionID, state, len(result.PerHookResults), "")
+		s.LastHookRunAt = e.nowFn()
+		delete(e.hookProgress, ev.SessionID)
+		if result.Passed {
+			s.HooksBlocked = false
+			s.HooksBlockReason = ""
+			e.StatusText = "Hooks passed"
+			return
+		}
+		s.HooksBlocked = true
+		reason := strings.TrimSpace(result.Reason)
+		if reason == "" {
+			reason = "unknown hook failure"
+		}
+		if result.FailedHookID != "" {
+			reason = fmt.Sprintf("%s command %d %s", result.FailedHookID, result.FailedCommandIndex, reason)
+		}
+		s.HooksBlockReason = reason
+		e.AddSystemMessage("Prompts blocked for this session until hooks pass. Run /hooks run after fixes.")
+		e.StatusText = "Hooks blocked"
+	}
 }
 
 func (e *Engine) HandleProviderEvent(ev providers.Event) {
@@ -733,6 +898,10 @@ func (e *Engine) ProviderEvents() <-chan providers.Event {
 		return nil
 	}
 	return e.Manager.Events()
+}
+
+func (e *Engine) HookEvents() <-chan HookEvent {
+	return e.hookEvents
 }
 
 func (e *Engine) StopAll(ctx context.Context) {

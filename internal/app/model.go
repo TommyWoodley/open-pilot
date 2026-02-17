@@ -32,6 +32,7 @@ type Model struct {
 	pending         map[string]int
 
 	providerEvents <-chan providers.Event
+	hookEvents     <-chan corechat.HookEvent
 
 	ProviderState  string
 	StatusText     string
@@ -50,10 +51,12 @@ func NewModel(manager providers.Manager, cfg config.Config, persister ...coreses
 		store = coresession.NewStoreWithPersister(persister[0])
 	}
 	chat := corechat.NewEngine(store, manager, cfg)
+	chat.EnableAsyncHooks()
 	m := Model{
 		store:                store,
 		chat:                 chat,
 		providerEvents:       chat.ProviderEvents(),
+		hookEvents:           chat.HookEvents(),
 		ProviderState:        chat.ProviderState,
 		StatusText:           chat.StatusText,
 		GeneratingTick:       0,
@@ -74,9 +77,12 @@ func NewModel(manager providers.Manager, cfg config.Config, persister ...coreses
 
 // Init performs startup work.
 func (m Model) Init() tea.Cmd {
-	cmds := make([]tea.Cmd, 0, 2)
+	cmds := make([]tea.Cmd, 0, 3)
 	if m.providerEvents != nil {
 		cmds = append(cmds, waitProviderEvent(m.providerEvents))
+	}
+	if m.hookEvents != nil {
+		cmds = append(cmds, waitHookEvent(m.hookEvents))
 	}
 	cmds = append(cmds, generationTickCmd())
 	return tea.Batch(cmds...)

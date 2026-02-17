@@ -2,6 +2,7 @@ package app
 
 import (
 	coreautocomplete "github.com/thwoodle/open-pilot/internal/core/autocomplete"
+	corechat "github.com/thwoodle/open-pilot/internal/core/chat"
 	corecommand "github.com/thwoodle/open-pilot/internal/core/command"
 	"github.com/thwoodle/open-pilot/internal/domain"
 	"github.com/thwoodle/open-pilot/internal/providers"
@@ -87,6 +88,10 @@ type providerEventMsg struct {
 	event providers.Event
 }
 
+type hookEventMsg struct {
+	event corechat.HookEvent
+}
+
 func waitProviderEvent(ch <-chan providers.Event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
@@ -94,6 +99,16 @@ func waitProviderEvent(ch <-chan providers.Event) tea.Cmd {
 			return nil
 		}
 		return providerEventMsg{event: ev}
+	}
+}
+
+func waitHookEvent(ch <-chan corechat.HookEvent) tea.Cmd {
+	return func() tea.Msg {
+		ev, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return hookEventMsg{event: ev}
 	}
 }
 
@@ -193,4 +208,15 @@ func (m *Model) consumeStoreWarning() {
 	if warn := m.store.TakePersistenceWarning(); warn != "" {
 		m.StatusText = warn
 	}
+}
+
+func (m *Model) handleHookEvent(ev corechat.HookEvent) {
+	m.chat.HandleHookEvent(ev)
+	m.ProviderState = m.chat.ProviderState
+	m.StatusText = m.chat.StatusText
+	m.ActiveSessionID = m.store.ActiveSessionID
+	if m.AutoFollowTranscript {
+		m.TranscriptScroll = 0
+	}
+	m.consumeStoreWarning()
 }
