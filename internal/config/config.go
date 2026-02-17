@@ -18,6 +18,7 @@ type Config struct {
 	SessionDBPath             string
 	SessionPersistenceWarning string
 	BuiltinHooksDir           string
+	BuiltinSkillsDir          string
 	BuiltinHooks              HookCatalog
 	BuiltinHooksLoadError     string
 }

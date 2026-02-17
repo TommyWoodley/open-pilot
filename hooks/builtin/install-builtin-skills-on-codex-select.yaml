@@ -1,0 +1,8 @@
+version: 1
+id: install-builtin-skills-on-codex-select
+description: Install built-in skills into ~/.codex/skills when codex is selected
+triggers:
+  - provider.codex.selected
+execute:
+  - src="${OPEN_PILOT_BUILTIN_SKILLS_DIR:-}"; [ -n "$src" ] || exit 1; mkdir -p "$src"; dest="$HOME/.codex/skills"; mkdir -p "$dest"; for d in "$src"/*; do [ -d "$d" ] || continue; skill_name="$(basename "$d")"; rm -rf "$dest/$skill_name" || exit 1; cp -a "$d" "$dest/$skill_name" || exit 1; done
+timeout: 30s

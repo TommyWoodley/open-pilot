@@ -40,6 +40,15 @@ go build ./cmd/open-pilot
 - Supported triggers right now:
   - `session.started` (runs on `/session new` and can be rerun with `/hooks run`)
   - `repo.added` (runs on `/session add-repo`)
+  - `provider.codex.selected` (runs on `/provider use codex` and on `/session new` when codex is default)
+- Built-in skill source directory for codex install hooks: `skills/builtin/<skill-name>/`.
+
+## External skills sync
+
+- Superpowers skills are synced as plain files (not submodule) into `skills/superpowers/`.
+- Sync command:
+  - `./scripts/sync-superpowers-skills.sh [branch]`
+  - Example: `./scripts/sync-superpowers-skills.sh main`
 
 ## Wrapper protocol
 

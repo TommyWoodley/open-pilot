@@ -610,3 +610,80 @@ func TestSessionAddRepoRunsRepoAddedHooks(t *testing.T) {
 		t.Fatalf("expected hook progress to render as pilot/system message, got role=%q", last.Role)
 	}
 }
+
+func TestProviderUseCodexRunsProviderCodexSelectedHooks(t *testing.T) {
+	store := session.NewStore()
+	cfg := config.Default()
+	cfg.BuiltinHooks = config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{ID: "install-codex-skills", Triggers: []config.HookTrigger{config.HookTriggerProviderCodexSelected}, Execute: []string{"echo ok"}, Timeout: time.Second},
+		},
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
+	h := &fakeHooks{result: corehooks.RunResult{Passed: true}}
+	eng.Hooks = h
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "demo"})
+	callsAfterSessionNew := h.calls
+
+	eng.RunCommand(command.Command{Kind: command.KindProviderUse, ProviderID: "codex"})
+	if h.calls != callsAfterSessionNew+1 {
+		t.Fatalf("expected one additional hook run on provider use codex, before=%d after=%d", callsAfterSessionNew, h.calls)
+	}
+	if h.lastTrigger != config.HookTriggerProviderCodexSelected {
+		t.Fatalf("expected provider.codex.selected trigger, got %q", h.lastTrigger)
+	}
+}
+
+func TestSessionNewRunsProviderCodexSelectedHooksWhenCodexDefault(t *testing.T) {
+	store := session.NewStore()
+	cfg := config.Default()
+	cfg.BuiltinHooks = config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{ID: "session-started", Triggers: []config.HookTrigger{config.HookTriggerSessionStarted}, Execute: []string{"echo ok"}, Timeout: time.Second},
+			{ID: "install-codex-skills", Triggers: []config.HookTrigger{config.HookTriggerProviderCodexSelected}, Execute: []string{"echo ok"}, Timeout: time.Second},
+		},
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
+	h := &fakeHooks{result: corehooks.RunResult{Passed: true}}
+	eng.Hooks = h
+
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "demo"})
+	if h.calls != 2 {
+		t.Fatalf("expected two hook runs on session new with codex default (session.started + provider.codex.selected), got %d", h.calls)
+	}
+}
+
+func TestProviderCodexSelectedHookFailureBlocksPrompts(t *testing.T) {
+	store := session.NewStore()
+	cfg := config.Default()
+	cfg.BuiltinHooks = config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{ID: "install-codex-skills", Triggers: []config.HookTrigger{config.HookTriggerProviderCodexSelected}, Execute: []string{"echo ok"}, Timeout: time.Second},
+		},
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
+	h := &fakeHooks{
+		result: corehooks.RunResult{
+			Passed:             false,
+			HooksMatched:       1,
+			FailedHookID:       "install-codex-skills",
+			FailedCommandIndex: 1,
+			Reason:             "exit=1",
+			PerHookResults: []corehooks.HookResult{
+				{HookID: "install-codex-skills", Passed: false, Reason: "exit=1"},
+			},
+		},
+	}
+	eng.Hooks = h
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "demo"})
+	eng.RunCommand(command.Command{Kind: command.KindProviderUse, ProviderID: "codex"})
+
+	s := store.ActiveSession()
+	if s == nil || !s.HooksBlocked {
+		t.Fatalf("expected hooks to block session on provider.codex.selected failure")
+	}
+	eng.SendPrompt("hello")
+	if !strings.Contains(eng.StatusText, "Hooks blocked") {
+		t.Fatalf("expected hooks blocked status, got %q", eng.StatusText)
+	}
+}

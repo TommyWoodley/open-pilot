@@ -66,6 +66,29 @@ execute:
 	}
 }
 
+func TestLoadBuiltinHooksParsesProviderCodexSelectedTrigger(t *testing.T) {
+	dir := t.TempDir()
+	writeHookFile(t, dir, "a.yaml", `
+version: 1
+id: provider-codex-hook
+triggers:
+  - provider.codex.selected
+execute:
+  - echo ok
+`)
+
+	catalog, err := LoadBuiltinHooks(dir)
+	if err != nil {
+		t.Fatalf("expected load success, got error: %v", err)
+	}
+	if len(catalog.Hooks) != 1 {
+		t.Fatalf("expected one hook, got %d", len(catalog.Hooks))
+	}
+	if catalog.Hooks[0].Triggers[0] != HookTriggerProviderCodexSelected {
+		t.Fatalf("unexpected trigger: %q", catalog.Hooks[0].Triggers[0])
+	}
+}
+
 func TestLoadBuiltinHooksRejectsDuplicateID(t *testing.T) {
 	dir := t.TempDir()
 	content := `

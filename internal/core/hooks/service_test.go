@@ -26,7 +26,7 @@ func TestRunExecutesCommandsInOrder(t *testing.T) {
 				Timeout: time.Second,
 			},
 		},
-	}, "")
+	}, "", "")
 
 	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
 	if !result.Passed {
@@ -52,7 +52,7 @@ func TestRunStopsOnNonZeroExit(t *testing.T) {
 				Timeout:  time.Second,
 			},
 		},
-	}, "")
+	}, "", "")
 
 	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
 	if result.Passed {
@@ -76,7 +76,7 @@ func TestRunReturnsTimeoutReason(t *testing.T) {
 				Timeout:  10 * time.Millisecond,
 			},
 		},
-	}, "")
+	}, "", "")
 
 	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
 	if result.Passed {
@@ -102,7 +102,7 @@ func TestRunSetsEnvOnCommand(t *testing.T) {
 				},
 			},
 		},
-	}, "")
+	}, "", "")
 
 	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
 	if !result.Passed {
@@ -129,7 +129,7 @@ func TestRunSetsRepoPathEnvOnCommand(t *testing.T) {
 				Timeout:  time.Second,
 			},
 		},
-	}, "")
+	}, "", "")
 
 	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "/tmp/my-repo", nil)
 	if !result.Passed {
@@ -145,12 +145,83 @@ func TestRunSetsRepoPathEnvOnCommand(t *testing.T) {
 }
 
 func TestRunFailsClosedOnLoadError(t *testing.T) {
-	svc := NewService(config.HookCatalog{}, "broken yaml")
+	svc := NewService(config.HookCatalog{}, "broken yaml", "")
 	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
 	if result.Passed {
 		t.Fatalf("expected fail-closed")
 	}
 	if !strings.Contains(result.Reason, "broken yaml") {
 		t.Fatalf("expected load error in reason, got %q", result.Reason)
+	}
+}
+
+func TestRunSetsBuiltinSkillsDirEnvOnCommand(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skills-dir.txt")
+	svc := NewService(config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{
+				ID:       "skills-dir-env",
+				Triggers: []config.HookTrigger{config.HookTriggerProviderCodexSelected},
+				Execute:  []string{"echo $OPEN_PILOT_BUILTIN_SKILLS_DIR > " + target},
+				Timeout:  time.Second,
+			},
+		},
+	}, "", "/tmp/open-pilot/skills/builtin")
+
+	result := svc.Run(context.Background(), config.HookTriggerProviderCodexSelected, "s-1", "", nil)
+	if !result.Passed {
+		t.Fatalf("expected pass, got %#v", result)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read builtin skills dir output: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "/tmp/open-pilot/skills/builtin" {
+		t.Fatalf("expected builtin skills dir env, got %q", string(data))
+	}
+}
+
+func TestProviderCodexSelectedHookReplacesExistingSkills(t *testing.T) {
+	work := t.TempDir()
+	sourceRoot := filepath.Join(work, "skills", "builtin")
+	destRoot := filepath.Join(work, "home", ".codex", "skills")
+	sourceSkillDir := filepath.Join(sourceRoot, "my-skill")
+	destSkillDir := filepath.Join(destRoot, "my-skill")
+	if err := os.MkdirAll(sourceSkillDir, 0o755); err != nil {
+		t.Fatalf("mkdir source skill: %v", err)
+	}
+	if err := os.MkdirAll(destSkillDir, 0o755); err != nil {
+		t.Fatalf("mkdir dest skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceSkillDir, "SKILL.md"), []byte("new"), 0o644); err != nil {
+		t.Fatalf("write source skill file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(destSkillDir, "stale.txt"), []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write stale file: %v", err)
+	}
+
+	command := "src=\"$OPEN_PILOT_BUILTIN_SKILLS_DIR\"; [ -n \"$src\" ] || exit 1; mkdir -p \"$src\"; dest=\"$HOME/.codex/skills\"; mkdir -p \"$dest\"; for d in \"$src\"/*; do [ -d \"$d\" ] || continue; skill_name=\"$(basename \"$d\")\"; rm -rf \"$dest/$skill_name\" || exit 1; cp -a \"$d\" \"$dest/$skill_name\" || exit 1; done"
+	svc := NewService(config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{
+				ID:       "install-skills",
+				Triggers: []config.HookTrigger{config.HookTriggerProviderCodexSelected},
+				Execute:  []string{command},
+				Timeout:  time.Second * 5,
+			},
+		},
+	}, "", sourceRoot)
+
+	t.Setenv("HOME", filepath.Join(work, "home"))
+	result := svc.Run(context.Background(), config.HookTriggerProviderCodexSelected, "s-1", "", nil)
+	if !result.Passed {
+		t.Fatalf("expected pass, got %#v", result)
+	}
+	if _, err := os.Stat(filepath.Join(destSkillDir, "SKILL.md")); err != nil {
+		t.Fatalf("expected copied skill file, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(destSkillDir, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale file to be removed, got err=%v", err)
 	}
 }

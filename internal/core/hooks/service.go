@@ -42,14 +42,16 @@ type HookResult struct {
 }
 
 type runner struct {
-	catalog   config.HookCatalog
-	loadError string
+	catalog          config.HookCatalog
+	loadError        string
+	builtinSkillsDir string
 }
 
-func NewService(catalog config.HookCatalog, loadError string) Service {
+func NewService(catalog config.HookCatalog, loadError, builtinSkillsDir string) Service {
 	return &runner{
-		catalog:   catalog,
-		loadError: loadError,
+		catalog:          catalog,
+		loadError:        loadError,
+		builtinSkillsDir: builtinSkillsDir,
 	}
 }
 
@@ -86,7 +88,7 @@ func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID,
 		for cmdIdx, command := range hook.Execute {
 			cmdCtx, cancel := context.WithTimeout(ctx, hook.Timeout)
 			cmd := exec.CommandContext(cmdCtx, "bash", "-lc", command)
-			cmd.Env = append(os.Environ(), runtimeEnv(sessionID, repoPath)...)
+			cmd.Env = append(os.Environ(), runtimeEnv(sessionID, repoPath, r.builtinSkillsDir)...)
 			cmd.Env = append(cmd.Env, envToList(hook.Env)...)
 			if err := cmd.Run(); err != nil {
 				ctxErr := cmdCtx.Err()
@@ -138,13 +140,16 @@ func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID,
 	return result
 }
 
-func runtimeEnv(sessionID, repoPath string) []string {
-	out := make([]string, 0, 2)
+func runtimeEnv(sessionID, repoPath, builtinSkillsDir string) []string {
+	out := make([]string, 0, 3)
 	if sessionID != "" {
 		out = append(out, "OPEN_PILOT_SESSION_ID="+sessionID)
 	}
 	if repoPath != "" {
 		out = append(out, "OPEN_PILOT_REPO_PATH="+repoPath)
+	}
+	if builtinSkillsDir != "" {
+		out = append(out, "OPEN_PILOT_BUILTIN_SKILLS_DIR="+builtinSkillsDir)
 	}
 	return out
 }

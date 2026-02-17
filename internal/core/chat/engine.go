@@ -81,7 +81,7 @@ func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config)
 	return &Engine{
 		Store:         store,
 		Manager:       manager,
-		Hooks:         corehooks.NewService(cfg.BuiltinHooks, cfg.BuiltinHooksLoadError),
+		Hooks:         corehooks.NewService(cfg.BuiltinHooks, cfg.BuiltinHooksLoadError, cfg.BuiltinSkillsDir),
 		Config:        cfg,
 		ProviderState: "disconnected",
 		StatusText:    "No agent connected",
@@ -202,6 +202,9 @@ func (e *Engine) RunCommand(cmd command.Command) {
 			e.AddSystemMessage("Session " + s.Name + " created. Codex provider config missing; set provider manually.")
 		}
 		e.runHooks(s, config.HookTriggerSessionStarted, "")
+		if s.ProviderID == "codex" && !s.HooksBlocked {
+			e.runHooks(s, config.HookTriggerProviderCodexSelected, "")
+		}
 	case command.KindSessionList:
 		e.AddSystemMessage(e.Store.ListSessionsText())
 	case command.KindSessionUse:
@@ -261,6 +264,9 @@ func (e *Engine) RunCommand(cmd command.Command) {
 		e.ProviderState = "starting"
 		e.StatusText = "Provider set to " + cmd.ProviderID
 		e.AddSystemMessage("Using provider " + cmd.ProviderID)
+		if cmd.ProviderID == "codex" {
+			e.runHooks(s, config.HookTriggerProviderCodexSelected, "")
+		}
 	case command.KindProviderStatus:
 		s := e.Store.ActiveSession()
 		provider := "none"
