@@ -39,3 +39,11 @@ func TestSuggestionsIncludeSessionDeleteByName(t *testing.T) {
 		t.Fatalf("expected session delete suggestion")
 	}
 }
+
+func TestApplyHooksRunCompletion(t *testing.T) {
+	var e Engine
+	out := e.Apply("/hooks r", Options{})
+	if out != "/hooks run " {
+		t.Fatalf("expected /hooks run completion, got %q", out)
+	}
+}

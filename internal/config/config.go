@@ -17,4 +17,7 @@ type Config struct {
 	SessionPersistenceEnabled bool
 	SessionDBPath             string
 	SessionPersistenceWarning string
+	BuiltinHooksDir           string
+	BuiltinHooks              HookCatalog
+	BuiltinHooksLoadError     string
 }

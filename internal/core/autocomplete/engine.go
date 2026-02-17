@@ -111,6 +111,8 @@ func tokenOptionsForContext(context []string, current string, opt Options) []str
 		return command.RootSuggestions()
 	case 1:
 		switch context[0] {
+		case "/hooks":
+			return []string{"run"}
 		case "/provider":
 			return []string{"status", "use"}
 		case "/session":

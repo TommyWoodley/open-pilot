@@ -8,6 +8,7 @@ import (
 
 const (
 	KindHelp           = "help"
+	KindHooksRun       = "hooks.run"
 	KindProviderStatus = "provider.status"
 	KindProviderUse    = "provider.use"
 	KindSessionList    = "session.list"
@@ -44,6 +45,11 @@ func Parse(input string) (Command, bool, error) {
 	switch parts[0] {
 	case "/help":
 		return Command{Kind: KindHelp}, true, nil
+	case "/hooks":
+		if len(parts) == 2 && parts[1] == "run" {
+			return Command{Kind: KindHooksRun}, true, nil
+		}
+		return Command{}, true, errors.New("usage: /hooks run")
 	case "/provider":
 		if len(parts) == 2 && parts[1] == "status" {
 			return Command{Kind: KindProviderStatus}, true, nil
@@ -99,18 +105,20 @@ func HelpText() string {
 		"/session repo use <repo-id>",
 		"/provider use <codex|cursor>",
 		"/provider status",
+		"/hooks run",
 		"/help",
 		"Navigation: Up/Down/PgUp/PgDn/Home/End scroll transcript",
 	}, "\n")
 }
 
 func RootSuggestions() []string {
-	return []string{"/help", "/provider", "/session"}
+	return []string{"/help", "/hooks", "/provider", "/session"}
 }
 
 func BaseSuggestions() []string {
 	return []string{
 		"/help",
+		"/hooks run",
 		"/provider status",
 		"/provider use codex",
 		"/provider use cursor",

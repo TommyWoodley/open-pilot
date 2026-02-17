@@ -49,9 +49,19 @@ func TestParseInvalid(t *testing.T) {
 	}
 }
 
+func TestParseHooksRun(t *testing.T) {
+	cmd, isCommand, err := Parse("/hooks run")
+	if err != nil || !isCommand {
+		t.Fatalf("expected hooks command parse success, err=%v isCommand=%v", err, isCommand)
+	}
+	if cmd.Kind != KindHooksRun {
+		t.Fatalf("unexpected command: %#v", cmd)
+	}
+}
+
 func TestHelpTextContainsCommands(t *testing.T) {
 	h := HelpText()
-	if !strings.Contains(h, "/session new") || !strings.Contains(h, "/session delete") || !strings.Contains(h, "/provider status") {
+	if !strings.Contains(h, "/session new") || !strings.Contains(h, "/session delete") || !strings.Contains(h, "/provider status") || !strings.Contains(h, "/hooks run") {
 		t.Fatalf("expected command help text to contain core commands")
 	}
 }

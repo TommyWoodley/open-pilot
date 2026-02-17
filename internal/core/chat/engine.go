@@ -9,7 +9,9 @@ import (
 
 	"github.com/thwoodle/open-pilot/internal/config"
 	"github.com/thwoodle/open-pilot/internal/core/command"
+	corehooks "github.com/thwoodle/open-pilot/internal/core/hooks"
 	"github.com/thwoodle/open-pilot/internal/core/session"
+	"github.com/thwoodle/open-pilot/internal/domain"
 	"github.com/thwoodle/open-pilot/internal/providers"
 )
 
@@ -39,6 +41,7 @@ type commandRunState struct {
 type Engine struct {
 	Store         *session.Store
 	Manager       ProviderManager
+	Hooks         corehooks.Service
 	Config        config.Config
 	ProviderState string
 	StatusText    string
@@ -53,6 +56,7 @@ func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config)
 	return &Engine{
 		Store:         store,
 		Manager:       manager,
+		Hooks:         corehooks.NewService(cfg.BuiltinHooks, cfg.BuiltinHooksLoadError),
 		Config:        cfg,
 		ProviderState: "disconnected",
 		StatusText:    "No agent connected",
@@ -94,6 +98,15 @@ func (e *Engine) SendPrompt(input string) {
 	s := e.Store.ActiveSession()
 	if s == nil {
 		e.AddSystemMessage("Create/select a session first: /session new <name>")
+		return
+	}
+	if s.HooksBlocked {
+		reason := strings.TrimSpace(s.HooksBlockReason)
+		if reason == "" {
+			reason = "startup hooks failed"
+		}
+		e.AddSystemMessage("Prompts blocked for this session until hooks pass. Run /hooks run after fixes. Last error: " + reason)
+		e.StatusText = "Hooks blocked"
 		return
 	}
 	if s.ProviderID == "" {
@@ -150,6 +163,7 @@ func (e *Engine) RunCommand(cmd command.Command) {
 		} else {
 			e.AddSystemMessage("Session " + s.Name + " created. Codex provider config missing; set provider manually.")
 		}
+		e.runHooks(s, config.HookTriggerSessionStarted, "")
 	case command.KindSessionList:
 		e.AddSystemMessage(e.Store.ListSessionsText())
 	case command.KindSessionUse:
@@ -174,6 +188,14 @@ func (e *Engine) RunCommand(cmd command.Command) {
 			return
 		}
 		e.AddSystemMessage("Repo added")
+		repo := e.Store.ActiveRepo()
+		repoPath := ""
+		if repo != nil {
+			repoPath = repo.Path
+		}
+		if s := e.Store.ActiveSession(); s != nil {
+			e.runHooks(s, config.HookTriggerRepoAdded, repoPath)
+		}
 	case command.KindSessionRepos:
 		e.AddSystemMessage(e.Store.ListReposText())
 	case command.KindSessionRepoUse:
@@ -208,9 +230,61 @@ func (e *Engine) RunCommand(cmd command.Command) {
 			provider = s.ProviderID
 		}
 		e.AddSystemMessage("provider=" + provider + " state=" + e.ProviderState)
+	case command.KindHooksRun:
+		s := e.Store.ActiveSession()
+		if s == nil {
+			e.AddSystemMessage("Create/select a session first: /session new <name>")
+			return
+		}
+		e.runHooks(s, config.HookTriggerSessionStarted, "")
 	default:
 		e.AddSystemMessage("Unknown command")
 	}
+}
+
+func (e *Engine) runHooks(s *domain.Session, trigger config.HookTrigger, repoPath string) {
+	if s == nil {
+		return
+	}
+	if e.Hooks == nil {
+		s.HooksBlocked = false
+		s.HooksBlockReason = ""
+		s.LastHookRunAt = e.nowFn()
+		return
+	}
+	e.StatusText = "Running hooks..."
+	result := e.Hooks.Run(context.Background(), trigger, s.ID, repoPath)
+	s.LastHookRunAt = e.nowFn()
+	e.AddSystemMessage(fmt.Sprintf("Running hooks (%d)...", result.HooksMatched))
+	for _, hookResult := range result.PerHookResults {
+		e.AddSystemMessage("Hook start: " + hookResult.HookID)
+		if hookResult.Passed {
+			e.AddSystemMessage("Hook passed: " + hookResult.HookID)
+			continue
+		}
+		if hookResult.HookID == result.FailedHookID && result.FailedCommandIndex > 0 {
+			e.AddSystemMessage(fmt.Sprintf("Hook failed: %s (command %d, %s)", hookResult.HookID, result.FailedCommandIndex, hookResult.Reason))
+		} else {
+			e.AddSystemMessage("Hook failed: " + hookResult.HookID + " (" + hookResult.Reason + ")")
+		}
+	}
+	if result.Passed {
+		s.HooksBlocked = false
+		s.HooksBlockReason = ""
+		e.StatusText = "Hooks passed"
+		return
+	}
+	s.HooksBlocked = true
+	reason := strings.TrimSpace(result.Reason)
+	if reason == "" {
+		reason = "unknown hook failure"
+	}
+	if result.FailedHookID != "" {
+		reason = fmt.Sprintf("%s command %d %s", result.FailedHookID, result.FailedCommandIndex, reason)
+	}
+	s.HooksBlockReason = reason
+	e.AddSystemMessage("Prompts blocked for this session until hooks pass. Run /hooks run after fixes.")
+	e.StatusText = "Hooks blocked"
 }
 
 func (e *Engine) HandleProviderEvent(ev providers.Event) {

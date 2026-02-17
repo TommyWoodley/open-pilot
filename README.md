@@ -30,7 +30,16 @@ go build ./cmd/open-pilot
 - `/session repo use <repo-id>`
 - `/provider use <codex|cursor>`
 - `/provider status`
+- `/hooks run` (rerun startup hooks for active session)
 - `/help`
+
+## Built-in hooks (MVP)
+
+- Hook files are auto-discovered from `hooks/builtin/*.yaml`.
+- One YAML file defines one hook.
+- Supported triggers right now:
+  - `session.started` (runs on `/session new` and can be rerun with `/hooks run`)
+  - `repo.added` (runs on `/session add-repo`)
 
 ## Wrapper protocol
 

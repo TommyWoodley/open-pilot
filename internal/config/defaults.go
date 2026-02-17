@@ -23,5 +23,6 @@ func Default() Config {
 		},
 		SessionPersistenceEnabled: true,
 		SessionDBPath:             "",
+		BuiltinHooksDir:           "/Users/thwoodle/Desktop/open-pilot/hooks/builtin",
 	}
 }

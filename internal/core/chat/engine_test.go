@@ -9,12 +9,27 @@ import (
 
 	"github.com/thwoodle/open-pilot/internal/config"
 	"github.com/thwoodle/open-pilot/internal/core/command"
+	corehooks "github.com/thwoodle/open-pilot/internal/core/hooks"
 	"github.com/thwoodle/open-pilot/internal/core/session"
 	"github.com/thwoodle/open-pilot/internal/providers"
 )
 
 type fakeManager struct {
 	events chan providers.Event
+}
+
+type fakeHooks struct {
+	result       corehooks.RunResult
+	calls        int
+	lastTrigger  config.HookTrigger
+	lastRepoPath string
+}
+
+func (f *fakeHooks) Run(_ context.Context, trigger config.HookTrigger, _ string, repoPath string) corehooks.RunResult {
+	f.calls++
+	f.lastTrigger = trigger
+	f.lastRepoPath = repoPath
+	return f.result
 }
 
 func (f *fakeManager) SendPrompt(context.Context, string, string, string, string, string) error {
@@ -423,5 +438,114 @@ func TestHandleProviderTurnUsageIsNotRendered(t *testing.T) {
 	after := len(store.ActiveSession().Messages)
 	if after != before {
 		t.Fatalf("expected usage event to be log-only (no transcript message), before=%d after=%d", before, after)
+	}
+}
+
+func TestSessionNewRunsStartupHooksAndBlocksPromptOnFailure(t *testing.T) {
+	store := session.NewStore()
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	eng.Hooks = &fakeHooks{
+		result: corehooks.RunResult{
+			Passed:             false,
+			HooksMatched:       1,
+			FailedHookID:       "ensure-branch",
+			FailedCommandIndex: 1,
+			Reason:             "exit=1",
+			PerHookResults: []corehooks.HookResult{
+				{HookID: "ensure-branch", Passed: false, Reason: "exit=1"},
+			},
+		},
+	}
+
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "demo"})
+	s := store.ActiveSession()
+	if s == nil {
+		t.Fatalf("expected active session")
+	}
+	if !s.HooksBlocked {
+		t.Fatalf("expected hooks to block session on failure")
+	}
+
+	eng.SendPrompt("hello")
+	if !strings.Contains(eng.StatusText, "Hooks blocked") {
+		t.Fatalf("expected hooks blocked status, got %q", eng.StatusText)
+	}
+}
+
+func TestHooksRunClearsBlockedStateOnSuccess(t *testing.T) {
+	store := session.NewStore()
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	h := &fakeHooks{
+		result: corehooks.RunResult{
+			Passed:       false,
+			HooksMatched: 1,
+			Reason:       "exit=1",
+			PerHookResults: []corehooks.HookResult{
+				{HookID: "ensure-branch", Passed: false, Reason: "exit=1"},
+			},
+		},
+	}
+	eng.Hooks = h
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "demo"})
+
+	h.result = corehooks.RunResult{
+		Passed:       true,
+		HooksMatched: 1,
+		PerHookResults: []corehooks.HookResult{
+			{HookID: "ensure-branch", Passed: true},
+		},
+	}
+	eng.RunCommand(command.Command{Kind: command.KindHooksRun})
+
+	s := store.ActiveSession()
+	if s == nil {
+		t.Fatalf("expected active session")
+	}
+	if s.HooksBlocked {
+		t.Fatalf("expected hooks to be unblocked")
+	}
+	if eng.StatusText != "Hooks passed" {
+		t.Fatalf("expected hooks passed status, got %q", eng.StatusText)
+	}
+}
+
+func TestSessionUseDoesNotAutoRunHooks(t *testing.T) {
+	store := session.NewStore()
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	h := &fakeHooks{
+		result: corehooks.RunResult{Passed: true},
+	}
+	eng.Hooks = h
+
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "one"})
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "two"})
+	callsAfterNew := h.calls
+	eng.RunCommand(command.Command{Kind: command.KindSessionUse, SessionID: "one"})
+
+	if h.calls != callsAfterNew {
+		t.Fatalf("expected /session use to not run hooks, before=%d after=%d", callsAfterNew, h.calls)
+	}
+}
+
+func TestSessionAddRepoRunsRepoAddedHooks(t *testing.T) {
+	store := session.NewStore()
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	h := &fakeHooks{
+		result: corehooks.RunResult{Passed: true},
+	}
+	eng.Hooks = h
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "demo"})
+	callsAfterSessionNew := h.calls
+
+	eng.RunCommand(command.Command{Kind: command.KindSessionAddRepo, RepoPath: t.TempDir()})
+
+	if h.calls != callsAfterSessionNew+1 {
+		t.Fatalf("expected one additional hook run on add-repo, before=%d after=%d", callsAfterSessionNew, h.calls)
+	}
+	if h.lastTrigger != config.HookTriggerRepoAdded {
+		t.Fatalf("expected repo.added trigger, got %q", h.lastTrigger)
+	}
+	if strings.TrimSpace(h.lastRepoPath) == "" {
+		t.Fatalf("expected repo path to be passed to hook runner")
 	}
 }
