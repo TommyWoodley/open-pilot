@@ -245,7 +245,7 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 	case providers.EventReasoning:
 		text := conciseReasoningText(ev.Text)
 		if text != "" {
-			e.Store.AddSessionSystemMessage(s.ID, "[agent-thought] "+text)
+			e.Store.AddAssistantMessage(s.ID, "[agent-thought] "+text)
 		}
 	case providers.EventCommandExecution:
 		e.handleCommandExecutionEvent(s.ID, ev)
@@ -284,19 +284,19 @@ func (e *Engine) handleCommandExecutionEvent(sessionID string, ev providers.Even
 	status := strings.ToLower(strings.TrimSpace(ev.CommandStatus))
 	switch status {
 	case "in_progress":
-		e.Store.AddSessionSystemMessage(sessionID, "Running command: "+cmd)
+		e.Store.AddAssistantMessage(sessionID, "Running command: "+cmd)
 		return
 	case "failed":
-		e.Store.AddSessionSystemMessage(sessionID, fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
+		e.Store.AddAssistantMessage(sessionID, fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
 	default:
 		if ev.CommandExitCode != nil && *ev.CommandExitCode != 0 {
-			e.Store.AddSessionSystemMessage(sessionID, fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
+			e.Store.AddAssistantMessage(sessionID, fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
 		} else {
-			e.Store.AddSessionSystemMessage(sessionID, fmt.Sprintf("Command completed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
+			e.Store.AddAssistantMessage(sessionID, fmt.Sprintf("Command completed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
 		}
 	}
 	if out := summarizeCommandOutput(ev.CommandOutput, 8, 500); out != "" {
-		e.Store.AddSessionSystemMessage(sessionID, "Command output:\n"+out)
+		e.Store.AddAssistantMessage(sessionID, "Command output:\n"+out)
 	}
 }
 
