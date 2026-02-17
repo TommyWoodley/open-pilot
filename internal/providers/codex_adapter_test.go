@@ -143,6 +143,23 @@ func TestCodexAdapterNoFinalMessageEmitsError(t *testing.T) {
 	}
 }
 
+func TestCodexAdapterAgentMessageWithoutOutputFileDoesNotEmitError(t *testing.T) {
+	env := setupFakeCodex(t, "agent_message_only", "thread-agent", "")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-1", SessionID: "sess-1", RepoPath: env.repoDir, Text: "hello"}); err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	ev := waitEventType(t, events, EventAgentMessage)
+	if strings.TrimSpace(ev.Text) == "" {
+		t.Fatalf("expected agent message text")
+	}
+	assertNoEventTypeWithin(t, events, EventError, 300*time.Millisecond)
+}
+
 func TestCodexAdapterStreamsPreviewChunks(t *testing.T) {
 	env := setupFakeCodex(t, "stream", "thread-stream", "hello world")
 
@@ -297,6 +314,12 @@ if [ "$mode" = "empty" ]; then
   : > "$out_file"
   exit 0
 fi
+if [ "$mode" = "agent_message_only" ]; then
+  printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
+  printf '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hello from agent"}}\n'
+  : > "$out_file"
+  exit 0
+fi
 if [ "$mode" = "stream" ]; then
   printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
   printf '{"type":"response.output_text.delta","delta":"hello "}\n'
@@ -368,6 +391,26 @@ func waitEventType(t *testing.T, events <-chan Event, eventType string) Event {
 			}
 			if ev.Type == eventType {
 				return ev
+			}
+		}
+	}
+}
+
+func assertNoEventTypeWithin(t *testing.T, events <-chan Event, eventType string, d time.Duration) {
+	t.Helper()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-timer.C:
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if ev.Type == eventType {
+				t.Fatalf("unexpected event %q: %#v", eventType, ev)
 			}
 		}
 	}

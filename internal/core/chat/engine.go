@@ -421,7 +421,7 @@ func (e *Engine) renderHookProgress(sessionID string, state hookProgressState, c
 		lines = append(lines, fmt.Sprintf("%s: %s", id, status))
 	}
 	lines = append(lines, "[[pilot-divider:]]")
-	e.upsertItemMessageWithRole(sessionID, state.progressID, strings.Join(lines, "\n"), domain.RoleSystem)
+	e.upsertItemMessageWithRole(sessionID, "", state.progressID, strings.Join(lines, "\n"), domain.RoleSystem)
 }
 
 func (e *Engine) emitHookEvent(ev HookEvent) {
@@ -543,7 +543,7 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 		if text != "" {
 			content := "[agent-thought] " + text
 			if strings.TrimSpace(ev.ItemID) != "" {
-				e.upsertItemMessage(s.ID, ev.ItemID, content)
+				e.upsertItemMessage(s.ID, ev.RequestID, ev.ItemID, content)
 			} else {
 				e.Store.AddAssistantMessage(s.ID, content)
 			}
@@ -555,7 +555,7 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 		}
 		e.clearPendingPlaceholder(ev.RequestID, s.ID)
 		if strings.TrimSpace(ev.ItemID) != "" {
-			e.upsertItemMessage(s.ID, ev.ItemID, text)
+			e.upsertItemMessage(s.ID, ev.RequestID, ev.ItemID, text)
 		} else {
 			e.Store.AddAssistantMessage(s.ID, text)
 		}
@@ -629,7 +629,7 @@ func (e *Engine) handleCommandExecutionEvent(sessionID string, ev providers.Even
 	if status == "in_progress" {
 		content := renderCommandRunning(displayCommand)
 		if ref.ItemID != "" {
-			e.upsertItemMessage(sessionID, ref.ItemID, content)
+			e.upsertItemMessage(sessionID, ev.RequestID, ref.ItemID, content)
 			return
 		}
 		e.Store.AddAssistantMessage(sessionID, content)
@@ -652,18 +652,18 @@ func (e *Engine) handleCommandExecutionEvent(sessionID string, ev providers.Even
 	}
 	if ref.ItemID != "" {
 		delete(e.commandRuns, ref)
-		e.upsertItemMessage(sessionID, ref.ItemID, content)
+		e.upsertItemMessage(sessionID, ev.RequestID, ref.ItemID, content)
 		return
 	}
 	e.Store.AddAssistantMessage(sessionID, content)
 }
 
-func (e *Engine) upsertItemMessage(sessionID, itemID, content string) {
-	e.upsertItemMessageWithRole(sessionID, itemID, content, domain.RoleAssistant)
+func (e *Engine) upsertItemMessage(sessionID, requestID, itemID, content string) {
+	e.upsertItemMessageWithRole(sessionID, requestID, itemID, content, domain.RoleAssistant)
 }
 
-func (e *Engine) upsertItemMessageWithRole(sessionID, itemID, content, role string) {
-	key := itemRefKey(sessionID, itemID)
+func (e *Engine) upsertItemMessageWithRole(sessionID, requestID, itemID, content, role string) {
+	key := itemRefKey(sessionID, requestID, itemID)
 	if ref, ok := e.itemRefs[key]; ok {
 		if e.Store.ReplaceMessageAt(ref.SessionID, ref.Index, content) {
 			return
@@ -681,8 +681,11 @@ func (e *Engine) upsertItemMessageWithRole(sessionID, itemID, content, role stri
 	}
 }
 
-func itemRefKey(sessionID, itemID string) string {
-	return sessionID + "|" + itemID
+func itemRefKey(sessionID, requestID, itemID string) string {
+	if strings.TrimSpace(requestID) == "" {
+		return sessionID + "|" + itemID
+	}
+	return sessionID + "|" + requestID + "|" + itemID
 }
 
 func renderCommandRunning(command string) string {

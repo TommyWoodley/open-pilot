@@ -373,7 +373,7 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 		return result, readErr
 	}
 
-	if strings.TrimSpace(result.LastMessage) == "" {
+	if strings.TrimSpace(result.LastMessage) == "" && !result.SkipFinal {
 		result.FailureMessage = "codex returned no assistant message"
 		a.logf("failure", "request=%s msg=%q", prompt.ID, result.FailureMessage)
 		return result, errors.New(result.FailureMessage)

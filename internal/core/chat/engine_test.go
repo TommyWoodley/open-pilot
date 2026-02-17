@@ -384,6 +384,35 @@ func TestHandleProviderAgentMessageClearsPendingPlaceholderAndUsesItemID(t *test
 	}
 }
 
+func TestHandleProviderAgentMessageSameItemIDDifferentRequestDoesNotOverwrite(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventAgentMessage,
+		SessionID: s.ID,
+		RequestID: "req-1",
+		ItemID:    "item_0",
+		Text:      "first turn",
+	})
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventAgentMessage,
+		SessionID: s.ID,
+		RequestID: "req-2",
+		ItemID:    "item_0",
+		Text:      "second turn",
+	})
+
+	msgs := store.ActiveSession().Messages
+	if len(msgs) != 2 {
+		t.Fatalf("expected two distinct messages, got %d", len(msgs))
+	}
+	if msgs[0].Content != "first turn" || msgs[1].Content != "second turn" {
+		t.Fatalf("unexpected contents: %#v", msgs)
+	}
+}
+
 func TestHandleProviderCommandExecutionUsesExploredSummaryForDiscoveryCommands(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
