@@ -202,7 +202,7 @@ func TestViewRendersDotsSuffixForStreamingMessageWithContent(t *testing.T) {
 	}
 }
 
-func TestStatusShowsDotsWhenBusy(t *testing.T) {
+func TestStatusBusyDoesNotShowDots(t *testing.T) {
 	t.Parallel()
 
 	m := NewModel(nil, config.Default())
@@ -210,8 +210,11 @@ func TestStatusShowsDotsWhenBusy(t *testing.T) {
 	m.GeneratingTick = 1
 
 	status := m.renderStatus()
-	if !strings.Contains(status, "state=busy..") {
-		t.Fatalf("expected status dots while busy, got %q", status)
+	if !strings.Contains(status, "state=busy") {
+		t.Fatalf("expected busy state in status, got %q", status)
+	}
+	if strings.Contains(status, "state=busy..") || strings.Contains(status, "state=busy...") {
+		t.Fatalf("expected no animated dots in status, got %q", status)
 	}
 }
 

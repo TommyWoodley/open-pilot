@@ -24,9 +24,6 @@ func (m Model) renderStatus() string {
 		}
 	}
 	stateText := m.ProviderState
-	if m.ProviderState == "busy" {
-		stateText += m.generationDots()
-	}
 	text := fmt.Sprintf("session=%s provider=%s repo=%s state=%s | ↑/↓ scroll PgUp/PgDn Home/End", session, provider, repo, stateText)
 	return ui.FooterStyle.Render(text)
 }
