@@ -47,6 +47,7 @@ type codexRunResult struct {
 	ThreadID       string
 	LastMessage    string
 	FailureMessage string
+	SkipFinal      bool
 }
 
 func newCodexCLIAdapter(binary string) Adapter {
@@ -147,7 +148,7 @@ func (a *codexCLIAdapter) Send(ctx context.Context, handle SessionHandle, prompt
 		}
 
 		clean := strings.TrimSpace(result.LastMessage)
-		if clean == "" {
+		if clean == "" && !result.SkipFinal {
 			h.safeEmit(Event{
 				Type:      EventError,
 				SessionID: h.sessionID,
@@ -159,14 +160,16 @@ func (a *codexCLIAdapter) Send(ctx context.Context, handle SessionHandle, prompt
 			return
 		}
 
-		h.safeEmit(Event{
-			Type:      EventFinal,
-			SessionID: h.sessionID,
-			Provider:  "codex",
-			RepoPath:  prompt.RepoPath,
-			RequestID: prompt.ID,
-			Text:      clean,
-		})
+		if !result.SkipFinal {
+			h.safeEmit(Event{
+				Type:      EventFinal,
+				SessionID: h.sessionID,
+				Provider:  "codex",
+				RepoPath:  prompt.RepoPath,
+				RequestID: prompt.ID,
+				Text:      clean,
+			})
+		}
 	}()
 	return nil
 }
@@ -236,8 +239,6 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 	lastStderrMsg := ""
 	stderrLines := make([]string, 0, 8)
 	var streamedText strings.Builder
-	lastAgentMessage := ""
-
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -268,12 +269,12 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 					turnFailedMsg = msg
 				}
 			}
-			if msg := extractCompletedAgentMessage(raw); msg != "" {
-				lastAgentMessage = msg
-			}
 			if normalized, ok := normalizeCodexEvent(ev, raw); ok {
 				handledByNormalization = true
 				if normalized.Type != "" {
+					if normalized.Type == EventAgentMessage {
+						result.SkipFinal = true
+					}
 					normalized.SessionID = h.sessionID
 					normalized.Provider = "codex"
 					normalized.RepoPath = prompt.RepoPath
@@ -346,9 +347,6 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 		}
 	} else {
 		result.LastMessage = streamedText.String()
-		if strings.TrimSpace(lastAgentMessage) != "" {
-			result.LastMessage = lastAgentMessage
-		}
 	}
 
 	if waitErr != nil {
@@ -467,9 +465,6 @@ func normalizeCodexStderrLine(line string) string {
 }
 
 func extractCodexPreviewChunk(ev codexJSONEvent, raw map[string]any) string {
-	if msg := extractCompletedAgentMessage(raw); msg != "" {
-		return msg + "\n\n"
-	}
 	if !isPreviewEventType(ev.Type) {
 		return ""
 	}
@@ -580,7 +575,14 @@ func normalizeCodexEvent(ev codexJSONEvent, raw map[string]any) (Event, bool) {
 				CommandOutput:   stringValue(item["aggregated_output"]),
 			}, true
 		case "agent_message":
-			// Agent messages are handled by the existing chunk/final text path.
+			if t == "item.completed" {
+				return Event{
+					Type:     EventAgentMessage,
+					ItemType: itemType,
+					ItemID:   itemID,
+					Text:     strings.TrimSpace(stringValue(item["text"])),
+				}, true
+			}
 			return Event{}, true
 		default:
 			return Event{}, false

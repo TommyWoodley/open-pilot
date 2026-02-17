@@ -67,8 +67,8 @@ func TestExtractCodexPreviewChunk(t *testing.T) {
 			"text": "final message",
 		},
 	}
-	if got := extractCodexPreviewChunk(codexJSONEvent{Type: "item.completed"}, raw); got != "final message\n\n" {
-		t.Fatalf("expected chunk from item.completed agent_message, got %q", got)
+	if got := extractCodexPreviewChunk(codexJSONEvent{Type: "item.completed"}, raw); got != "" {
+		t.Fatalf("expected item.completed agent_message to be normalized, not chunked, got %q", got)
 	}
 }
 
@@ -149,6 +149,27 @@ func TestNormalizeCodexEventCommandExecution(t *testing.T) {
 	}
 	if got.CommandExitCode == nil || *got.CommandExitCode != 0 {
 		t.Fatalf("expected exit code 0, got %#v", got.CommandExitCode)
+	}
+}
+
+func TestNormalizeCodexEventAgentMessage(t *testing.T) {
+	t.Parallel()
+
+	ev := codexJSONEvent{Type: "item.completed"}
+	raw := map[string]any{
+		"type": "item.completed",
+		"item": map[string]any{
+			"id":   "item-3",
+			"type": "agent_message",
+			"text": "done",
+		},
+	}
+	got, ok := normalizeCodexEvent(ev, raw)
+	if !ok {
+		t.Fatalf("expected agent_message normalization")
+	}
+	if got.Type != EventAgentMessage || got.ItemID != "item-3" || got.Text != "done" {
+		t.Fatalf("unexpected agent message normalized event: %#v", got)
 	}
 }
 

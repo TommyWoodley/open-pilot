@@ -30,6 +30,7 @@ type Engine struct {
 	ProviderState string
 	StatusText    string
 	pending       map[string]pendingRef
+	itemRefs      map[string]pendingRef
 	unknownSeen   map[string]struct{}
 }
 
@@ -41,6 +42,7 @@ func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config)
 		ProviderState: "disconnected",
 		StatusText:    "No agent connected",
 		pending:       make(map[string]pendingRef),
+		itemRefs:      make(map[string]pendingRef),
 		unknownSeen:   make(map[string]struct{}),
 	}
 }
@@ -245,12 +247,32 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 	case providers.EventReasoning:
 		text := conciseReasoningText(ev.Text)
 		if text != "" {
-			e.Store.AddAssistantMessage(s.ID, "[agent-thought] "+text)
+			content := "[agent-thought] " + text
+			if strings.TrimSpace(ev.ItemID) != "" {
+				e.upsertItemMessage(s.ID, ev.ItemID, content)
+			} else {
+				e.Store.AddAssistantMessage(s.ID, content)
+			}
+		}
+	case providers.EventAgentMessage:
+		text := strings.TrimSpace(ev.Text)
+		if text == "" {
+			return
+		}
+		e.clearPendingPlaceholder(ev.RequestID, s.ID)
+		if strings.TrimSpace(ev.ItemID) != "" {
+			e.upsertItemMessage(s.ID, ev.ItemID, text)
+		} else {
+			e.Store.AddAssistantMessage(s.ID, text)
 		}
 	case providers.EventCommandExecution:
 		e.handleCommandExecutionEvent(s.ID, ev)
 	case providers.EventTurnUsage:
-		// Usage is logged but intentionally not shown in transcript/status.
+		if ev.RequestID != "" {
+			delete(e.pending, ev.RequestID)
+		}
+		e.ProviderState = "ready"
+		e.StatusText = "Response complete"
 	case providers.EventExited:
 		e.ProviderState = "error"
 		msg := ev.Message
@@ -282,21 +304,73 @@ func (e *Engine) handleCommandExecutionEvent(sessionID string, ev providers.Even
 		cmd = "(unknown command)"
 	}
 	status := strings.ToLower(strings.TrimSpace(ev.CommandStatus))
+	var content string
 	switch status {
 	case "in_progress":
-		e.Store.AddAssistantMessage(sessionID, "Running command: "+cmd)
-		return
+		content = "Running command: " + cmd
 	case "failed":
-		e.Store.AddAssistantMessage(sessionID, fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
+		content = fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd)
 	default:
 		if ev.CommandExitCode != nil && *ev.CommandExitCode != 0 {
-			e.Store.AddAssistantMessage(sessionID, fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
+			content = fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd)
 		} else {
-			e.Store.AddAssistantMessage(sessionID, fmt.Sprintf("Command completed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
+			content = fmt.Sprintf("Command completed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd)
 		}
 	}
 	if out := summarizeCommandOutput(ev.CommandOutput, 8, 500); out != "" {
-		e.Store.AddAssistantMessage(sessionID, "Command output:\n"+out)
+		content += "\nCommand output:\n" + out
+	}
+	if strings.TrimSpace(ev.ItemID) != "" {
+		e.upsertItemMessage(sessionID, ev.ItemID, content)
+		return
+	}
+	e.Store.AddAssistantMessage(sessionID, content)
+}
+
+func (e *Engine) upsertItemMessage(sessionID, itemID, content string) {
+	key := itemRefKey(sessionID, itemID)
+	if ref, ok := e.itemRefs[key]; ok {
+		if e.Store.ReplaceMessageAt(ref.SessionID, ref.Index, content) {
+			return
+		}
+		delete(e.itemRefs, key)
+	}
+	idx := e.Store.AppendAssistantMessage(sessionID, content)
+	if idx >= 0 {
+		e.itemRefs[key] = pendingRef{SessionID: sessionID, Index: idx}
+	}
+}
+
+func itemRefKey(sessionID, itemID string) string {
+	return sessionID + "|" + itemID
+}
+
+func (e *Engine) clearPendingPlaceholder(requestID, sessionID string) {
+	if strings.TrimSpace(requestID) == "" {
+		return
+	}
+	ref, ok := e.pending[requestID]
+	if !ok {
+		return
+	}
+	delete(e.pending, requestID)
+	if ref.SessionID != sessionID {
+		return
+	}
+	if !e.Store.DeleteMessageAt(ref.SessionID, ref.Index) {
+		return
+	}
+	for reqID, pendingRef := range e.pending {
+		if pendingRef.SessionID == ref.SessionID && pendingRef.Index > ref.Index {
+			pendingRef.Index--
+			e.pending[reqID] = pendingRef
+		}
+	}
+	for key, itemRef := range e.itemRefs {
+		if itemRef.SessionID == ref.SessionID && itemRef.Index > ref.Index {
+			itemRef.Index--
+			e.itemRefs[key] = itemRef
+		}
 	}
 }
 

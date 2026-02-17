@@ -254,12 +254,112 @@ func TestHandleProviderCommandOutputTruncation(t *testing.T) {
 	})
 
 	msgs := store.ActiveSession().Messages
-	if len(msgs) < 2 {
-		t.Fatalf("expected command status + output messages")
+	if len(msgs) == 0 {
+		t.Fatalf("expected command message")
 	}
 	last := msgs[len(msgs)-1].Content
 	if !strings.Contains(last, "... (truncated)") {
 		t.Fatalf("expected truncated marker in command output, got %q", last)
+	}
+}
+
+func TestHandleProviderCommandExecutionUpsertsByItemID(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:          providers.EventCommandExecution,
+		SessionID:     s.ID,
+		ItemID:        "item-2",
+		Command:       "go test ./...",
+		CommandStatus: "in_progress",
+	})
+	zero := 0
+	eng.HandleProviderEvent(providers.Event{
+		Type:            providers.EventCommandExecution,
+		SessionID:       s.ID,
+		ItemID:          "item-2",
+		Command:         "go test ./...",
+		CommandStatus:   "completed",
+		CommandExitCode: &zero,
+		CommandOutput:   "ok package/a",
+	})
+
+	msgs := store.ActiveSession().Messages
+	if len(msgs) != 1 {
+		t.Fatalf("expected one upserted message for same item id, got %d", len(msgs))
+	}
+	got := msgs[0].Content
+	if !strings.Contains(got, "Command completed (exit=0): go test ./...") {
+		t.Fatalf("expected completed command content, got %q", got)
+	}
+	if !strings.Contains(got, "Command output:\nok package/a") {
+		t.Fatalf("expected command output in same message, got %q", got)
+	}
+}
+
+func TestHandleProviderReasoningUpsertsByItemID(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventReasoning,
+		SessionID: s.ID,
+		ItemID:    "item-r",
+		Text:      "**Planning**",
+	})
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventReasoning,
+		SessionID: s.ID,
+		ItemID:    "item-r",
+		Text:      "**Planning with more detail**",
+	})
+
+	msgs := store.ActiveSession().Messages
+	if len(msgs) != 1 {
+		t.Fatalf("expected one reasoning message for same item id, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "[agent-thought] Planning with more detail") {
+		t.Fatalf("expected latest reasoning text to overwrite prior, got %q", msgs[0].Content)
+	}
+}
+
+func TestHandleProviderAgentMessageClearsPendingPlaceholderAndUsesItemID(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	idx := store.AppendAssistantStreaming("codex", "repo-1")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	eng.pending["req-1"] = pendingRef{SessionID: s.ID, Index: idx}
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventAgentMessage,
+		SessionID: s.ID,
+		RequestID: "req-1",
+		ItemID:    "item-1",
+		Text:      "first message",
+	})
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventAgentMessage,
+		SessionID: s.ID,
+		RequestID: "req-1",
+		ItemID:    "item-2",
+		Text:      "final message",
+	})
+
+	msgs := store.ActiveSession().Messages
+	if len(msgs) != 2 {
+		t.Fatalf("expected placeholder removed and two agent messages kept, got %d", len(msgs))
+	}
+	if msgs[0].Content != "first message" {
+		t.Fatalf("unexpected first message content: %q", msgs[0].Content)
+	}
+	if msgs[1].Content != "final message" {
+		t.Fatalf("unexpected second message content: %q", msgs[1].Content)
+	}
+	if _, ok := eng.pending["req-1"]; ok {
+		t.Fatalf("expected pending request to be cleared after itemized message flow")
 	}
 }
 

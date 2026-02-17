@@ -314,12 +314,40 @@ func (s *Store) AppendAssistantStreaming(providerID, repoID string) int {
 }
 
 func (s *Store) AddAssistantMessage(sessionID, text string) {
+	_ = s.AppendAssistantMessage(sessionID, text)
+}
+
+func (s *Store) AppendAssistantMessage(sessionID, text string) int {
 	ss := s.Sessions[sessionID]
 	if ss == nil {
-		return
+		return -1
 	}
 	ss.Messages = append(ss.Messages, domain.Message{ID: s.NextID("msg"), Role: domain.RoleAssistant, Content: text, Timestamp: s.Now()})
 	s.saveIfEnabled()
+	return len(ss.Messages) - 1
+}
+
+func (s *Store) ReplaceMessageAt(sessionID string, index int, text string) bool {
+	ss := s.Sessions[sessionID]
+	if ss == nil || index < 0 || index >= len(ss.Messages) {
+		return false
+	}
+	msg := ss.Messages[index]
+	msg.Content = text
+	msg.Streaming = false
+	ss.Messages[index] = msg
+	s.saveIfEnabled()
+	return true
+}
+
+func (s *Store) DeleteMessageAt(sessionID string, index int) bool {
+	ss := s.Sessions[sessionID]
+	if ss == nil || index < 0 || index >= len(ss.Messages) {
+		return false
+	}
+	ss.Messages = append(ss.Messages[:index], ss.Messages[index+1:]...)
+	s.saveIfEnabled()
+	return true
 }
 
 func (s *Store) FinalizeAt(sessionID string, index int, text string) bool {
