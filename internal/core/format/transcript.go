@@ -16,6 +16,7 @@ type RenderedMessage struct {
 type Styles struct {
 	UserPrefix           func(string) string
 	AgentPrefix          func(string) string
+	AgentMeta            func(string) string
 	SystemPrefix         func(string) string
 	Heading              func(string) string
 	List                 func(string) string
@@ -137,10 +138,18 @@ func BuildTranscriptLines(messages []domain.Message, styles Styles) []string {
 			lines = append(lines, formatted.Prefix)
 		} else {
 			bodyLines := strings.Split(formatted.Body, "\n")
+			metaMask := classifyAgentMetaLines(msg, bodyLines)
+			if metaMask[0] && styles.AgentMeta != nil {
+				bodyLines[0] = styles.AgentMeta(bodyLines[0])
+			}
 			lines = append(lines, formatted.Prefix+" "+bodyLines[0])
 			continuationIndent := strings.Repeat(" ", visibleTextWidth(formatted.Prefix)+1)
 			for i := 1; i < len(bodyLines); i++ {
-				lines = append(lines, continuationIndent+bodyLines[i])
+				line := bodyLines[i]
+				if metaMask[i] && styles.AgentMeta != nil {
+					line = styles.AgentMeta(line)
+				}
+				lines = append(lines, continuationIndent+line)
 			}
 		}
 		lines = append(lines, "")
@@ -149,6 +158,31 @@ func BuildTranscriptLines(messages []domain.Message, styles Styles) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
+}
+
+func classifyAgentMetaLines(msg domain.Message, bodyLines []string) []bool {
+	meta := make([]bool, len(bodyLines))
+	if msg.Role != domain.RoleAssistant || len(bodyLines) == 0 {
+		return meta
+	}
+	inCommandOutput := false
+	for i, line := range bodyLines {
+		trimmed := strings.TrimLeft(line, " ")
+		switch {
+		case strings.HasPrefix(trimmed, "[agent-thought]"),
+			strings.HasPrefix(trimmed, "Running command:"),
+			strings.HasPrefix(trimmed, "Command completed"),
+			strings.HasPrefix(trimmed, "Command failed"),
+			strings.HasPrefix(trimmed, "Command output:"):
+			meta[i] = true
+			inCommandOutput = strings.HasPrefix(trimmed, "Command output:")
+		case inCommandOutput:
+			meta[i] = true
+		default:
+			inCommandOutput = false
+		}
+	}
+	return meta
 }
 
 var sgrANSIRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)

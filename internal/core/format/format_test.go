@@ -271,3 +271,52 @@ func TestNoStreamingCallbacksOnFinalizedMessage(t *testing.T) {
 		t.Fatalf("expected finalized body unchanged, got %q", rendered.Body)
 	}
 }
+
+func TestAgentMetaMarkersUseAgentMetaStyle(t *testing.T) {
+	msg := domain.Message{
+		Role: domain.RoleAssistant,
+		Content: "[agent-thought] planning\nRunning command: ls\nCommand completed (exit=0): ls\n" +
+			"Command output:\nfile-a\nfile-b",
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{
+		AgentMeta: func(s string) string { return "<m>" + s + "</m>" },
+	})
+	joined := strings.Join(lines, "\n")
+	checks := []string{
+		"<m>[agent-thought] planning</m>",
+		"<m>Running command: ls</m>",
+		"<m>Command completed (exit=0): ls</m>",
+		"<m>Command output:</m>",
+		"<m>file-a</m>",
+		"<m>file-b</m>",
+	}
+	for _, c := range checks {
+		if !strings.Contains(joined, c) {
+			t.Fatalf("expected meta-styled content %q in %q", c, joined)
+		}
+	}
+}
+
+func TestNormalAssistantOutputDoesNotUseAgentMetaStyle(t *testing.T) {
+	msg := domain.Message{Role: domain.RoleAssistant, Content: "This is the final answer."}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{
+		AgentMeta: func(s string) string { return "<m>" + s + "</m>" },
+	})
+	if strings.Contains(strings.Join(lines, "\n"), "<m>") {
+		t.Fatalf("did not expect meta style on normal assistant output")
+	}
+}
+
+func TestPilotSystemMessageDoesNotUseAgentMetaStyle(t *testing.T) {
+	msg := domain.Message{Role: domain.RoleSystem, Content: "Using session demo"}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{
+		AgentMeta: func(s string) string { return "<m>" + s + "</m>" },
+	})
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "<m>") {
+		t.Fatalf("did not expect agent meta styling on pilot/system messages")
+	}
+	if !strings.Contains(joined, "[pilot] Using session demo") {
+		t.Fatalf("expected pilot prefix in output, got %q", joined)
+	}
+}

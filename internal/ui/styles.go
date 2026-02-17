@@ -34,6 +34,9 @@ var (
 					Bold(true).
 					Foreground(lipgloss.Color("119"))
 
+	TranscriptAgentMetaStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("245"))
+
 	TranscriptSystemPrefixStyle = lipgloss.NewStyle().
 					Bold(true).
 					Foreground(lipgloss.Color("214"))

@@ -17,6 +17,9 @@ func (m Model) transcriptStyles() format.Styles {
 		AgentPrefix: func(s string) string {
 			return ui.TranscriptAgentPrefixStyle.Render(s)
 		},
+		AgentMeta: func(s string) string {
+			return ui.TranscriptAgentMetaStyle.Render(s)
+		},
 		SystemPrefix: func(s string) string {
 			return ui.TranscriptSystemPrefixStyle.Render(s)
 		},
