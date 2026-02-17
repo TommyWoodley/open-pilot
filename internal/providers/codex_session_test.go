@@ -103,3 +103,72 @@ func TestExtractCompletedAgentMessage(t *testing.T) {
 		t.Fatalf("expected trimmed message, got %q", got)
 	}
 }
+
+func TestNormalizeCodexEventReasoning(t *testing.T) {
+	t.Parallel()
+
+	ev := codexJSONEvent{Type: "item.completed"}
+	raw := map[string]any{
+		"type": "item.completed",
+		"item": map[string]any{
+			"id":   "item-1",
+			"type": "reasoning",
+			"text": "**Planning project type detection**",
+		},
+	}
+	got, ok := normalizeCodexEvent(ev, raw)
+	if !ok {
+		t.Fatalf("expected reasoning event normalization")
+	}
+	if got.Type != EventReasoning || got.ItemType != "reasoning" || got.ItemID != "item-1" {
+		t.Fatalf("unexpected normalized event: %#v", got)
+	}
+}
+
+func TestNormalizeCodexEventCommandExecution(t *testing.T) {
+	t.Parallel()
+
+	ev := codexJSONEvent{Type: "item.completed"}
+	raw := map[string]any{
+		"type": "item.completed",
+		"item": map[string]any{
+			"id":                "item-2",
+			"type":              "command_execution",
+			"command":           "go test ./...",
+			"aggregated_output": "ok",
+			"status":            "completed",
+			"exit_code":         float64(0),
+		},
+	}
+	got, ok := normalizeCodexEvent(ev, raw)
+	if !ok {
+		t.Fatalf("expected command event normalization")
+	}
+	if got.Type != EventCommandExecution || got.Command != "go test ./..." || got.CommandStatus != "completed" {
+		t.Fatalf("unexpected command normalized event: %#v", got)
+	}
+	if got.CommandExitCode == nil || *got.CommandExitCode != 0 {
+		t.Fatalf("expected exit code 0, got %#v", got.CommandExitCode)
+	}
+}
+
+func TestNormalizeCodexEventTurnUsage(t *testing.T) {
+	t.Parallel()
+
+	ev := codexJSONEvent{Type: "turn.completed"}
+	raw := map[string]any{
+		"type": "turn.completed",
+		"usage": map[string]any{
+			"input_tokens":        float64(10),
+			"cached_input_tokens": float64(2),
+			"output_tokens":       float64(3),
+		},
+	}
+	got, ok := normalizeCodexEvent(ev, raw)
+	if !ok {
+		t.Fatalf("expected turn usage normalization")
+	}
+	if got.Type != EventTurnUsage || got.UsageInputTokens != 10 || got.UsageCachedInputTokens != 2 || got.UsageOutputTokens != 3 {
+		t.Fatalf("unexpected usage normalized event: %#v", got)
+	}
+}

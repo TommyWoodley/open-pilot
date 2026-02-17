@@ -6,6 +6,7 @@ import (
 
 	"github.com/thwoodle/open-pilot/internal/config"
 	"github.com/thwoodle/open-pilot/internal/domain"
+	"github.com/thwoodle/open-pilot/internal/providers"
 )
 
 func TestViewContainsCoreSections(t *testing.T) {
@@ -209,5 +210,64 @@ func TestStatusShowsDotsWhenBusy(t *testing.T) {
 	status := m.renderStatus()
 	if !strings.Contains(status, "state=busy..") {
 		t.Fatalf("expected status dots while busy, got %q", status)
+	}
+}
+
+func TestUnknownProviderEventAppearsInTranscript(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	m.Width = 100
+	m.Height = 24
+
+	m.handleProviderEvent(providers.Event{
+		Type:      providers.EventUnknown,
+		SessionID: s.ID,
+		Provider:  "codex",
+		RawType:   "item.completed",
+	})
+	view := m.View()
+	if !strings.Contains(view, "Unhandled provider event 'item.completed' (details logged).") {
+		t.Fatalf("expected unknown provider event system message in transcript, got: %s", view)
+	}
+}
+
+func TestCommandAndReasoningEventsAppearInTranscript(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	m.Width = 100
+	m.Height = 24
+
+	m.handleProviderEvent(providers.Event{
+		Type:      providers.EventReasoning,
+		SessionID: s.ID,
+		Text:      "**Planning project type detection**",
+	})
+	zero := 0
+	m.handleProviderEvent(providers.Event{
+		Type:            providers.EventCommandExecution,
+		SessionID:       s.ID,
+		Command:         "go test ./...",
+		CommandStatus:   "completed",
+		CommandExitCode: &zero,
+		CommandOutput:   "ok package/a",
+	})
+
+	view := m.View()
+	checks := []string{
+		"[agent-thought] Planning project type detection",
+		"Command completed (exit=0): go test ./...",
+		"Command output:",
+		"ok package/a",
+	}
+	for _, expected := range checks {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("expected transcript to contain %q, got: %s", expected, view)
+		}
 	}
 }

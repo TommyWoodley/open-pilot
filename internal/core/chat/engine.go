@@ -2,7 +2,9 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/thwoodle/open-pilot/internal/config"
 	"github.com/thwoodle/open-pilot/internal/core/command"
@@ -28,6 +30,7 @@ type Engine struct {
 	ProviderState string
 	StatusText    string
 	pending       map[string]pendingRef
+	unknownSeen   map[string]struct{}
 }
 
 func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config) *Engine {
@@ -38,6 +41,7 @@ func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config)
 		ProviderState: "disconnected",
 		StatusText:    "No agent connected",
 		pending:       make(map[string]pendingRef),
+		unknownSeen:   make(map[string]struct{}),
 	}
 }
 
@@ -238,6 +242,15 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 		e.StatusText = "Provider error"
 	case providers.EventStatus:
 		e.StatusText = ev.Message
+	case providers.EventReasoning:
+		text := conciseReasoningText(ev.Text)
+		if text != "" {
+			e.Store.AddSessionSystemMessage(s.ID, "[agent-thought] "+text)
+		}
+	case providers.EventCommandExecution:
+		e.handleCommandExecutionEvent(s.ID, ev)
+	case providers.EventTurnUsage:
+		// Usage is logged but intentionally not shown in transcript/status.
 	case providers.EventExited:
 		e.ProviderState = "error"
 		msg := ev.Message
@@ -246,7 +259,99 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 		}
 		e.Store.AddSessionSystemMessage(s.ID, msg)
 		e.StatusText = "Provider disconnected"
+	default:
+		rawType := strings.TrimSpace(ev.RawType)
+		if rawType == "" {
+			rawType = strings.TrimSpace(ev.Type)
+		}
+		if rawType == "" {
+			rawType = "unknown"
+		}
+		key := s.ID + "|" + ev.Provider + "|" + rawType
+		if _, seen := e.unknownSeen[key]; !seen {
+			e.unknownSeen[key] = struct{}{}
+			e.Store.AddSessionSystemMessage(s.ID, "Unhandled provider event '"+rawType+"' (details logged).")
+		}
+		e.StatusText = "Unhandled provider event: " + rawType + " (logged)"
 	}
+}
+
+func (e *Engine) handleCommandExecutionEvent(sessionID string, ev providers.Event) {
+	cmd := strings.TrimSpace(ev.Command)
+	if cmd == "" {
+		cmd = "(unknown command)"
+	}
+	status := strings.ToLower(strings.TrimSpace(ev.CommandStatus))
+	switch status {
+	case "in_progress":
+		e.Store.AddSessionSystemMessage(sessionID, "Running command: "+cmd)
+		return
+	case "failed":
+		e.Store.AddSessionSystemMessage(sessionID, fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
+	default:
+		if ev.CommandExitCode != nil && *ev.CommandExitCode != 0 {
+			e.Store.AddSessionSystemMessage(sessionID, fmt.Sprintf("Command failed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
+		} else {
+			e.Store.AddSessionSystemMessage(sessionID, fmt.Sprintf("Command completed (exit=%s): %s", formatExitCode(ev.CommandExitCode), cmd))
+		}
+	}
+	if out := summarizeCommandOutput(ev.CommandOutput, 8, 500); out != "" {
+		e.Store.AddSessionSystemMessage(sessionID, "Command output:\n"+out)
+	}
+}
+
+func conciseReasoningText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer("**", "", "__", "", "*", "", "_", "", "`", "")
+	text = replacer.Replace(text)
+	text = strings.Join(strings.Fields(text), " ")
+	return truncateRunes(text, 140)
+}
+
+func summarizeCommandOutput(output string, maxLines, maxChars int) string {
+	out := strings.TrimSpace(output)
+	if out == "" {
+		return ""
+	}
+	lines := strings.Split(out, "\n")
+	truncated := false
+	if maxLines > 0 && len(lines) > maxLines {
+		lines = lines[:maxLines]
+		truncated = true
+	}
+	out = strings.Join(lines, "\n")
+	if maxChars > 0 && utf8.RuneCountInString(out) > maxChars {
+		out = truncateRunes(out, maxChars)
+		truncated = true
+	}
+	if truncated {
+		return out + "\n... (truncated)"
+	}
+	return out
+}
+
+func truncateRunes(input string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(input) <= limit {
+		return input
+	}
+	runes := []rune(input)
+	if limit == 1 {
+		return "…"
+	}
+	return string(runes[:limit-1]) + "…"
+}
+
+func formatExitCode(code *int) string {
+	if code == nil {
+		return "?"
+	}
+	return fmt.Sprintf("%d", *code)
 }
 
 func (e *Engine) ProviderEvents() <-chan providers.Event {

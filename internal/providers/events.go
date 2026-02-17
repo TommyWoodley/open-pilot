@@ -3,24 +3,40 @@ package providers
 import "errors"
 
 const (
-	EventReady  = "ready"
-	EventChunk  = "chunk"
-	EventFinal  = "final"
-	EventError  = "error"
-	EventStatus = "status"
-	EventExited = "exited"
+	EventReady            = "ready"
+	EventChunk            = "chunk"
+	EventFinal            = "final"
+	EventError            = "error"
+	EventStatus           = "status"
+	EventExited           = "exited"
+	EventUnknown          = "unknown"
+	EventReasoning        = "reasoning"
+	EventCommandExecution = "command_execution"
+	EventTurnUsage        = "turn.usage"
 )
 
 // Event is a normalized provider event.
 type Event struct {
-	Type      string
-	SessionID string
-	Provider  string
-	RepoPath  string
-	RequestID string
-	Text      string
-	Message   string
-	Err       error
+	Type                   string
+	SessionID              string
+	Provider               string
+	RepoPath               string
+	RequestID              string
+	Text                   string
+	Message                string
+	RawType                string
+	RawJSON                string
+	DebugNote              string
+	ItemType               string
+	ItemID                 string
+	Command                string
+	CommandStatus          string
+	CommandExitCode        *int
+	CommandOutput          string
+	UsageInputTokens       int
+	UsageCachedInputTokens int
+	UsageOutputTokens      int
+	Err                    error
 }
 
 func parseWrapperEvent(line []byte) (Event, error) {
@@ -36,5 +52,25 @@ func parseWrapperEvent(line []byte) (Event, error) {
 	if raw.Type == "" {
 		return Event{}, errors.New("missing event type")
 	}
-	return Event{Type: raw.Type, RequestID: raw.ID, Text: raw.Text, Message: raw.Message}, nil
+	if isKnownEventType(raw.Type) {
+		return Event{Type: raw.Type, RequestID: raw.ID, Text: raw.Text, Message: raw.Message}, nil
+	}
+	return Event{
+		Type:      EventUnknown,
+		RequestID: raw.ID,
+		Text:      raw.Text,
+		Message:   raw.Message,
+		RawType:   raw.Type,
+		RawJSON:   string(line),
+		DebugNote: "wrapper event type not recognized",
+	}, nil
+}
+
+func isKnownEventType(eventType string) bool {
+	switch eventType {
+	case EventReady, EventChunk, EventFinal, EventError, EventStatus, EventExited, EventReasoning, EventCommandExecution, EventTurnUsage:
+		return true
+	default:
+		return false
+	}
 }

@@ -155,14 +155,19 @@ func (p *processAdapter) sendControl(proc *processHandle, payload map[string]any
 func (p *processAdapter) readStdout(_ SessionHandle, proc *processHandle, r io.Reader) {
 	s := bufio.NewScanner(r)
 	for s.Scan() {
-		e, err := parseWrapperEvent(s.Bytes())
+		line := s.Text()
+		e, err := parseWrapperEvent([]byte(line))
 		if err != nil {
+			logProviderDiagnostic(p.providerID, proc.sessionID, "", "", EventError, "invalid wrapper JSON event", line)
 			proc.events <- Event{Type: EventError, SessionID: proc.sessionID, Provider: p.providerID, RepoPath: proc.repoPath, Message: "invalid provider JSON event", Err: err}
 			continue
 		}
 		e.SessionID = proc.sessionID
 		e.Provider = p.providerID
 		e.RepoPath = proc.repoPath
+		if e.Type == EventUnknown {
+			logProviderDiagnostic(p.providerID, proc.sessionID, e.RequestID, e.RawType, e.Type, e.DebugNote, e.RawJSON)
+		}
 		proc.events <- e
 	}
 	if err := s.Err(); err != nil {

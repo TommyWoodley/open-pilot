@@ -244,12 +244,16 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 		defer wg.Done()
 		s := bufio.NewScanner(stdout)
 		for s.Scan() {
-			a.logf("stdout", "%s", s.Text())
-			ev, raw, ok := parseCodexJSONLine(s.Bytes())
+			line := s.Text()
+			trimmed := strings.TrimSpace(line)
+			a.logf("stdout", "%s", line)
+			ev, raw, ok := parseCodexJSONLine([]byte(trimmed))
 			if !ok {
 				continue
 			}
 			mu.Lock()
+			emittedChunk := false
+			handledByNormalization := false
 			switch ev.Type {
 			case "thread.started":
 				if ev.ThreadID != "" {
@@ -267,12 +271,37 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 			if msg := extractCompletedAgentMessage(raw); msg != "" {
 				lastAgentMessage = msg
 			}
+			if normalized, ok := normalizeCodexEvent(ev, raw); ok {
+				handledByNormalization = true
+				if normalized.Type != "" {
+					normalized.SessionID = h.sessionID
+					normalized.Provider = "codex"
+					normalized.RepoPath = prompt.RepoPath
+					normalized.RequestID = prompt.ID
+					h.safeEmit(normalized)
+				}
+			}
 			if chunk := extractCodexPreviewChunk(ev, raw); chunk != "" {
 				a.logf("chunk", "event_type=%s len=%d", ev.Type, len(chunk))
 				streamedText.WriteString(chunk)
+				emittedChunk = true
 				if onChunk != nil {
 					onChunk(chunk)
 				}
+			}
+			if !emittedChunk && !handledByNormalization && !isCodexHandledNoOutputType(ev.Type) {
+				reason := "codex event dropped: no preview/final mapping"
+				logProviderDiagnostic("codex", h.sessionID, prompt.ID, ev.Type, EventUnknown, reason, trimmed)
+				h.safeEmit(Event{
+					Type:      EventUnknown,
+					SessionID: h.sessionID,
+					Provider:  "codex",
+					RepoPath:  prompt.RepoPath,
+					RequestID: prompt.ID,
+					RawType:   ev.Type,
+					RawJSON:   trimmed,
+					DebugNote: reason,
+				})
 			}
 			mu.Unlock()
 		}
@@ -495,6 +524,104 @@ func isPreviewEventType(eventType string) bool {
 		return true
 	}
 	return false
+}
+
+func isCodexHandledNoOutputType(eventType string) bool {
+	t := strings.ToLower(strings.TrimSpace(eventType))
+	switch t {
+	case "", "thread.started", "turn.started", "turn.completed", "error", "turn.failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeCodexEvent(ev codexJSONEvent, raw map[string]any) (Event, bool) {
+	t := strings.ToLower(strings.TrimSpace(ev.Type))
+	switch t {
+	case "thread.started":
+		return Event{Type: EventStatus, Message: "thread started"}, true
+	case "turn.started":
+		return Event{Type: EventStatus, Message: "turn started"}, true
+	case "turn.completed":
+		usage, _ := raw["usage"].(map[string]any)
+		return Event{
+			Type:                   EventTurnUsage,
+			UsageInputTokens:       intValue(usage["input_tokens"]),
+			UsageCachedInputTokens: intValue(usage["cached_input_tokens"]),
+			UsageOutputTokens:      intValue(usage["output_tokens"]),
+		}, true
+	case "item.started", "item.completed":
+		item, ok := raw["item"].(map[string]any)
+		if !ok || item == nil {
+			return Event{}, false
+		}
+		itemType := strings.ToLower(strings.TrimSpace(stringValue(item["type"])))
+		itemID := stringValue(item["id"])
+		switch itemType {
+		case "reasoning":
+			if t == "item.completed" {
+				return Event{
+					Type:     EventReasoning,
+					ItemType: itemType,
+					ItemID:   itemID,
+					Text:     strings.TrimSpace(stringValue(item["text"])),
+				}, true
+			}
+			return Event{}, true
+		case "command_execution":
+			return Event{
+				Type:            EventCommandExecution,
+				ItemType:        itemType,
+				ItemID:          itemID,
+				Command:         stringValue(item["command"]),
+				CommandStatus:   stringValue(item["status"]),
+				CommandExitCode: intPtrValue(item["exit_code"]),
+				CommandOutput:   stringValue(item["aggregated_output"]),
+			}, true
+		case "agent_message":
+			// Agent messages are handled by the existing chunk/final text path.
+			return Event{}, true
+		default:
+			return Event{}, false
+		}
+	default:
+		return Event{}, false
+	}
+}
+
+func stringValue(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func intValue(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+func intPtrValue(v any) *int {
+	switch n := v.(type) {
+	case int:
+		x := n
+		return &x
+	case int64:
+		x := int(n)
+		return &x
+	case float64:
+		x := int(n)
+		return &x
+	default:
+		return nil
+	}
 }
 
 func findFirstString(v any, keys ...string) string {

@@ -181,6 +181,71 @@ func TestCodexAdapterFailureFallsBackToStderrMessage(t *testing.T) {
 	}
 }
 
+func TestCodexAdapterEmitsUnknownEventsAndLogsPayload(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "provider-debug.log")
+	t.Setenv("OPEN_PILOT_PROVIDER_DEBUG_LOG", logPath)
+	env := setupFakeCodex(t, "unknown_event", "thread-unknown", "hello")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-unknown", SessionID: "sess-1", RepoPath: env.repoDir, Text: "hello"}); err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	unknown := waitEventType(t, events, EventUnknown)
+	if unknown.RawType != "item.completed" {
+		t.Fatalf("expected unknown raw type item.completed, got %q", unknown.RawType)
+	}
+	if !strings.Contains(unknown.RawJSON, `"item":{"type":"tool_call"`) {
+		t.Fatalf("expected raw json payload, got %q", unknown.RawJSON)
+	}
+	_ = waitEventType(t, events, EventFinal)
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read provider debug log failed: %v", err)
+	}
+	if !strings.Contains(string(data), `"raw_type":"item.completed"`) {
+		t.Fatalf("expected unknown event diagnostic in log, got %q", string(data))
+	}
+}
+
+func TestCodexAdapterEmitsReasoningAndCommandLifecycleEvents(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "provider-debug.log")
+	t.Setenv("OPEN_PILOT_PROVIDER_DEBUG_LOG", logPath)
+	env := setupFakeCodex(t, "lifecycle", "thread-life", "done")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-life", SessionID: "sess-1", RepoPath: env.repoDir, Text: "hello"}); err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	reasoning := waitEventType(t, events, EventReasoning)
+	if !strings.Contains(reasoning.Text, "Planning") {
+		t.Fatalf("expected reasoning text, got %#v", reasoning)
+	}
+
+	cmdStart := waitEventType(t, events, EventCommandExecution)
+	if cmdStart.CommandStatus != "in_progress" || cmdStart.Command != "go test ./..." {
+		t.Fatalf("expected command start event, got %#v", cmdStart)
+	}
+
+	cmdDone := waitEventType(t, events, EventCommandExecution)
+	if cmdDone.CommandStatus != "completed" || cmdDone.CommandExitCode == nil || *cmdDone.CommandExitCode != 0 {
+		t.Fatalf("expected command completion event, got %#v", cmdDone)
+	}
+
+	usage := waitEventType(t, events, EventTurnUsage)
+	if usage.UsageInputTokens != 10 || usage.UsageCachedInputTokens != 2 || usage.UsageOutputTokens != 3 {
+		t.Fatalf("expected usage event, got %#v", usage)
+	}
+
+	_ = waitEventType(t, events, EventFinal)
+}
+
 type fakeCodexEnv struct {
 	binary   string
 	repoDir  string
@@ -242,6 +307,24 @@ fi
 if [ "$mode" = "fail_stderr" ]; then
   printf 'authentication required; run codex login\n' >&2
   exit 1
+fi
+if [ "$mode" = "unknown_event" ]; then
+  printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
+  printf '{"type":"item.completed","item":{"type":"tool_call","text":"patched files"}}\n'
+  printf '{"type":"response.output_text.delta","delta":"%s"}\n' "$last_message"
+  printf '%s' "$last_message" > "$out_file"
+  exit 0
+fi
+if [ "$mode" = "lifecycle" ]; then
+  printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
+  printf '{"type":"turn.started"}\n'
+  printf '{"type":"item.completed","item":{"id":"item-r","type":"reasoning","text":"**Planning**"}}\n'
+  printf '{"type":"item.started","item":{"id":"item-c","type":"command_execution","command":"go test ./...","aggregated_output":"","exit_code":null,"status":"in_progress"}}\n'
+  printf '{"type":"item.completed","item":{"id":"item-c","type":"command_execution","command":"go test ./...","aggregated_output":"ok\\n","exit_code":0,"status":"completed"}}\n'
+  printf '{"type":"response.output_text.delta","delta":"%s"}\n' "$last_message"
+  printf '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3}}\n'
+  printf '%s' "$last_message" > "$out_file"
+  exit 0
 fi
 printf 'unknown mode: %s\n' "$mode" >&2
 exit 2
