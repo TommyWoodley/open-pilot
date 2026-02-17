@@ -197,7 +197,7 @@ func TestViewRendersDotsSuffixForStreamingMessageWithContent(t *testing.T) {
 	if len(lines) < 2 || !strings.Contains(lines[0], "partial text") {
 		t.Fatalf("expected streamed content in transcript lines, got %v", lines)
 	}
-	if lines[1] != "..." {
+	if strings.TrimSpace(lines[1]) != "..." {
 		t.Fatalf("expected animated suffix dots line, got %v", lines)
 	}
 }
@@ -296,5 +296,33 @@ func TestViewFitsConfiguredHeight(t *testing.T) {
 	view := m.View()
 	if h := lipgloss.Height(view); h > m.Height {
 		t.Fatalf("expected rendered view height <= %d, got %d", m.Height, h)
+	}
+}
+
+func TestWrappedCommandOutputKeepsContinuationIndent(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	m.Width = 90
+	m.Height = 24
+	longLine := "go: writing stat cache: open /Users/thwoodle/go/pkg/mod/cache/download/github.com/thwoodle/open-pilot/@v/v0.0.0-20260217093314-837a977a3d15.info421941505.tmp: operation not permitted"
+	s.Messages = append(s.Messages, domain.Message{
+		ID:      "msg-cmd-wrap",
+		Role:    domain.RoleSystem,
+		Content: "Command output:\n" + longLine,
+	})
+
+	lines := m.displayTranscriptLines()
+	foundIndentedWrap := false
+	for _, line := range lines {
+		if strings.Contains(line, "837a977a3d15") && strings.HasPrefix(line, "         ") {
+			foundIndentedWrap = true
+			break
+		}
+	}
+	if !foundIndentedWrap {
+		t.Fatalf("expected wrapped continuation to keep system-body indent, got lines=%v", lines)
 	}
 }

@@ -96,7 +96,7 @@ func (m Model) transcriptVisibleLines() int {
 }
 
 func (m Model) maxTranscriptScroll() int {
-	total := len(m.buildTranscriptLines())
+	total := len(m.displayTranscriptLines())
 	visible := m.transcriptVisibleLines()
 	if total <= visible {
 		return 0

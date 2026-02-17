@@ -1,7 +1,9 @@
 package format
 
 import (
+	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/thwoodle/open-pilot/internal/domain"
 )
@@ -136,8 +138,9 @@ func BuildTranscriptLines(messages []domain.Message, styles Styles) []string {
 		} else {
 			bodyLines := strings.Split(formatted.Body, "\n")
 			lines = append(lines, formatted.Prefix+" "+bodyLines[0])
+			continuationIndent := strings.Repeat(" ", visibleTextWidth(formatted.Prefix)+1)
 			for i := 1; i < len(bodyLines); i++ {
-				lines = append(lines, bodyLines[i])
+				lines = append(lines, continuationIndent+bodyLines[i])
 			}
 		}
 		lines = append(lines, "")
@@ -146,4 +149,11 @@ func BuildTranscriptLines(messages []domain.Message, styles Styles) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
+}
+
+var sgrANSIRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func visibleTextWidth(s string) int {
+	plain := sgrANSIRegex.ReplaceAllString(s, "")
+	return utf8.RuneCountInString(plain)
 }

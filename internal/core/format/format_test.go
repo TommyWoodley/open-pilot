@@ -77,6 +77,34 @@ func TestBuildTranscriptLines(t *testing.T) {
 	}
 }
 
+func TestBuildTranscriptLinesMultilineBodyKeepsContinuationIndent(t *testing.T) {
+	lines := BuildTranscriptLines([]domain.Message{{Role: domain.RoleSystem, Content: "first\nsecond"}}, Styles{})
+	if len(lines) < 2 {
+		t.Fatalf("expected multiline transcript output")
+	}
+	if lines[0] != "[system] first" {
+		t.Fatalf("unexpected first line: %q", lines[0])
+	}
+	if lines[1] != "         second" { // len("[system] ") = 9
+		t.Fatalf("expected continuation line to align with body column, got %q", lines[1])
+	}
+}
+
+func TestBuildTranscriptLinesContinuationIndentWithStyledPrefix(t *testing.T) {
+	lines := BuildTranscriptLines([]domain.Message{{Role: domain.RoleSystem, Content: "one\ntwo"}}, Styles{
+		SystemPrefix: func(s string) string { return "\x1b[33m" + s + "\x1b[0m" },
+	})
+	if len(lines) < 2 {
+		t.Fatalf("expected multiline transcript output")
+	}
+	if !strings.HasSuffix(lines[1], "two") {
+		t.Fatalf("expected continuation to include body text, got %q", lines[1])
+	}
+	if lines[1] != "         two" { // visible width should ignore ANSI style bytes
+		t.Fatalf("expected continuation indent to ignore ANSI bytes, got %q", lines[1])
+	}
+}
+
 func TestRenderInlineBoldItalicStrike(t *testing.T) {
 	got := RenderInline("a **b** __c__ *d* _e_ ~~f~~", InlineStyles{
 		Bold: func(s string) string { return "<b>" + s + "</b>" },
