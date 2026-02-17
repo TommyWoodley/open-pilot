@@ -31,7 +31,7 @@ type Styles struct {
 }
 
 func FormatMessageForTranscript(msg domain.Message, styles Styles) RenderedMessage {
-	prefix := "[system]"
+	prefix := "[pilot]"
 	prefixRender := styles.SystemPrefix
 	switch msg.Role {
 	case domain.RoleUser:

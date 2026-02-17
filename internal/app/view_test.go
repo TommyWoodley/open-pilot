@@ -315,14 +315,18 @@ func TestWrappedCommandOutputKeepsContinuationIndent(t *testing.T) {
 	})
 
 	lines := m.displayTranscriptLines()
-	foundIndentedWrap := false
-	for _, line := range lines {
-		if strings.Contains(line, "837a977a3d15") && strings.HasPrefix(line, "         ") {
-			foundIndentedWrap = true
-			break
-		}
+	if len(lines) < 2 {
+		t.Fatalf("expected wrapped output to span multiple lines, got lines=%v", lines)
 	}
-	if !foundIndentedWrap {
-		t.Fatalf("expected wrapped continuation to keep system-body indent, got lines=%v", lines)
+	if !strings.HasPrefix(lines[0], "[pilot] Command output:") {
+		t.Fatalf("expected first line to include pilot prefix, got %q", lines[0])
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			continue
+		}
+		if !strings.HasPrefix(lines[i], "        ") { // len("[pilot] ") = 8
+			t.Fatalf("expected continuation line %d to keep pilot-body indent, got %q", i, lines[i])
+		}
 	}
 }

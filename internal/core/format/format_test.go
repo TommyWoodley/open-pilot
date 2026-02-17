@@ -82,10 +82,10 @@ func TestBuildTranscriptLinesMultilineBodyKeepsContinuationIndent(t *testing.T) 
 	if len(lines) < 2 {
 		t.Fatalf("expected multiline transcript output")
 	}
-	if lines[0] != "[system] first" {
+	if lines[0] != "[pilot] first" {
 		t.Fatalf("unexpected first line: %q", lines[0])
 	}
-	if lines[1] != "         second" { // len("[system] ") = 9
+	if lines[1] != "        second" { // len("[pilot] ") = 8
 		t.Fatalf("expected continuation line to align with body column, got %q", lines[1])
 	}
 }
@@ -100,7 +100,7 @@ func TestBuildTranscriptLinesContinuationIndentWithStyledPrefix(t *testing.T) {
 	if !strings.HasSuffix(lines[1], "two") {
 		t.Fatalf("expected continuation to include body text, got %q", lines[1])
 	}
-	if lines[1] != "         two" { // visible width should ignore ANSI style bytes
+	if lines[1] != "        two" { // visible width should ignore ANSI style bytes
 		t.Fatalf("expected continuation indent to ignore ANSI bytes, got %q", lines[1])
 	}
 }
