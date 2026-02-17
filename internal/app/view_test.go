@@ -125,6 +125,22 @@ func TestViewRendersLinkFallbackAndQuoteBlock(t *testing.T) {
 	}
 }
 
+func TestSessionListRendersWithoutActiveSession(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	_ = m.useSession(s.ID)
+	m.ActiveSessionID = ""
+
+	m.runCommand(Command{Kind: "session.list"})
+	view := m.View()
+
+	if !strings.Contains(view, "demo") {
+		t.Fatalf("expected session list in view without active session, got: %s", view)
+	}
+}
+
 func TestViewRendersDotsPlaceholderForEmptyStreamingMessage(t *testing.T) {
 	t.Parallel()
 
@@ -188,11 +204,10 @@ func TestStatusShowsDotsWhenBusy(t *testing.T) {
 
 	m := NewModel(nil, config.Default())
 	m.ProviderState = "busy"
-	m.StatusText = "Sending prompt"
 	m.GeneratingTick = 1
 
 	status := m.renderStatus()
-	if !strings.Contains(status, "Sending prompt..") {
+	if !strings.Contains(status, "state=busy..") {
 		t.Fatalf("expected status dots while busy, got %q", status)
 	}
 }

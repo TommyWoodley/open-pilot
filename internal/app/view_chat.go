@@ -10,7 +10,11 @@ import (
 func (m Model) renderTranscript() string {
 	allLines := m.buildTranscriptLines()
 	if len(allLines) == 0 {
-		return ui.BodyStyle.Width(max(m.Width-2, 50)).Render("No messages yet. Start with /session new <name>")
+		text := "No messages yet. Start with /session new <name>"
+		if m.activeSession() == nil && strings.TrimSpace(m.StatusText) != "" && m.StatusText != "No agent connected" {
+			text = m.StatusText
+		}
+		return ui.BodyStyle.Width(max(m.Width-2, 50)).Render(text)
 	}
 
 	visible := m.transcriptVisibleLines()

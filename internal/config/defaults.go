@@ -21,5 +21,7 @@ func Default() Config {
 				StartupTimeout: 10 * time.Second,
 			},
 		},
+		SessionPersistenceEnabled: true,
+		SessionDBPath:             "",
 	}
 }

@@ -1,9 +1,12 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/thwoodle/open-pilot/internal/domain"
 )
 
 func TestSessionCreateUse(t *testing.T) {
@@ -14,6 +17,34 @@ func TestSessionCreateUse(t *testing.T) {
 	}
 	if !s.UseSession(created.ID) {
 		t.Fatalf("expected use session to succeed")
+	}
+	if !s.UseSession("demo") {
+		t.Fatalf("expected use session by name to succeed")
+	}
+}
+
+func TestDeleteSessionByNameClearsActive(t *testing.T) {
+	s := NewStore()
+	created := s.CreateSession("demo")
+	if created == nil {
+		t.Fatalf("expected session create")
+	}
+	if !s.DeleteSession("demo") {
+		t.Fatalf("expected delete by name to succeed")
+	}
+	if s.ActiveSessionID != "" {
+		t.Fatalf("expected active session to clear after delete, got %q", s.ActiveSessionID)
+	}
+	if len(s.SessionOrder) != 0 {
+		t.Fatalf("expected no sessions after delete")
+	}
+}
+
+func TestHasSessionNameIsCaseInsensitive(t *testing.T) {
+	s := NewStore()
+	s.CreateSession("Demo Session")
+	if !s.HasSessionName("demo session") {
+		t.Fatalf("expected case-insensitive session name match")
 	}
 }
 
@@ -124,5 +155,97 @@ func TestMessageLifecycle(t *testing.T) {
 	}
 	if !s.FinalizeAt(s.ActiveSessionID, idx, "done") {
 		t.Fatalf("expected finalize")
+	}
+}
+
+type fakePersister struct {
+	loadSnapshot Snapshot
+	loadErr      error
+	saveErr      error
+	saveCalls    int
+}
+
+func (f *fakePersister) Load() (Snapshot, error) {
+	return f.loadSnapshot, f.loadErr
+}
+
+func (f *fakePersister) Save(s Snapshot) error {
+	f.saveCalls++
+	_ = s
+	return f.saveErr
+}
+
+func TestStoreMutationsTriggerSave(t *testing.T) {
+	fp := &fakePersister{}
+	s := NewStoreWithPersister(fp)
+	s.CreateSession("demo")
+	if fp.saveCalls == 0 {
+		t.Fatalf("expected save call after mutation")
+	}
+}
+
+func TestLoadFromPersisterLeavesNoActiveSession(t *testing.T) {
+	fp := &fakePersister{
+		loadSnapshot: Snapshot{
+			NextID: 20,
+			Sessions: []SessionSnapshot{
+				{
+					ID:         "session-1",
+					Name:       "one",
+					ProviderID: "codex",
+					CreatedAt:  100,
+					Repos:      []domain.RepoRef{{ID: "repo-1", Path: "/tmp", Label: "tmp"}},
+				},
+			},
+		},
+	}
+	s := NewStoreWithPersister(fp)
+	if len(s.SessionOrder) != 1 {
+		t.Fatalf("expected loaded session order")
+	}
+	if s.ActiveSessionID != "" {
+		t.Fatalf("expected no active session on load, got %q", s.ActiveSessionID)
+	}
+	if got := s.NextID("msg"); got != "msg-20" {
+		t.Fatalf("expected next id continuity, got %q", got)
+	}
+}
+
+func TestLoadFromPersisterNormalizesStreamingMessages(t *testing.T) {
+	fp := &fakePersister{
+		loadSnapshot: Snapshot{
+			Sessions: []SessionSnapshot{
+				{
+					ID:        "session-1",
+					Name:      "one",
+					CreatedAt: 100,
+					Messages: []MessageSnapshot{{
+						ID:        "msg-1",
+						Role:      domain.RoleAssistant,
+						Content:   "partial",
+						Timestamp: 100,
+						Streaming: true,
+					}},
+				},
+			},
+		},
+	}
+	s := NewStoreWithPersister(fp)
+	msg := s.Sessions["session-1"].Messages[0]
+	if msg.Streaming {
+		t.Fatalf("expected loaded streaming message to be normalized to false")
+	}
+}
+
+func TestSaveErrorSetsWarningButKeepsState(t *testing.T) {
+	fp := &fakePersister{saveErr: errors.New("disk full")}
+	s := NewStoreWithPersister(fp)
+	created := s.CreateSession("demo")
+	if created == nil {
+		t.Fatalf("expected session create despite save failure")
+	}
+	warn := s.TakePersistenceWarning()
+	if warn == "" {
+		t.Fatalf("expected persistence warning after save failure")
 	}
 }

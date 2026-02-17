@@ -44,6 +44,31 @@ func TestRunCommandSessionNewSetsDefaultProvider(t *testing.T) {
 	}
 }
 
+func TestRunCommandSessionNewRejectsDuplicateName(t *testing.T) {
+	store := session.NewStore()
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "demo"})
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "demo"})
+
+	if len(store.SessionOrder) != 1 {
+		t.Fatalf("expected duplicate name to be rejected")
+	}
+	if !strings.Contains(eng.StatusText, "already exists") {
+		t.Fatalf("expected duplicate-name status text, got %q", eng.StatusText)
+	}
+}
+
+func TestRunCommandSessionDeleteByName(t *testing.T) {
+	store := session.NewStore()
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "demo"})
+	eng.RunCommand(command.Command{Kind: command.KindSessionDelete, SessionID: "demo"})
+
+	if len(store.SessionOrder) != 0 {
+		t.Fatalf("expected session to be deleted")
+	}
+}
+
 func TestHandleProviderErrorKeepsMessageConcise(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")

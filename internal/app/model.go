@@ -42,8 +42,11 @@ type Model struct {
 }
 
 // NewModel returns the initial application state.
-func NewModel(manager providers.Manager, cfg config.Config) Model {
+func NewModel(manager providers.Manager, cfg config.Config, persister ...coresession.Persister) Model {
 	store := coresession.NewStore()
+	if len(persister) > 0 && persister[0] != nil {
+		store = coresession.NewStoreWithPersister(persister[0])
+	}
 	chat := corechat.NewEngine(store, manager, cfg)
 	m := Model{
 		store:                store,
@@ -57,6 +60,12 @@ func NewModel(manager providers.Manager, cfg config.Config) Model {
 		AutoFollowTranscript: true,
 		ActiveSessionID:      store.ActiveSessionID,
 		pending:              make(map[string]int),
+	}
+	if cfg.SessionPersistenceWarning != "" {
+		m.StatusText = cfg.SessionPersistenceWarning
+	}
+	if warn := store.TakePersistenceWarning(); warn != "" {
+		m.StatusText = warn
 	}
 	return m
 }

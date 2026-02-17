@@ -13,5 +13,8 @@ type ProviderConfig struct {
 
 // Config is the application runtime config.
 type Config struct {
-	Providers map[string]ProviderConfig
+	Providers                 map[string]ProviderConfig
+	SessionPersistenceEnabled bool
+	SessionDBPath             string
+	SessionPersistenceWarning string
 }

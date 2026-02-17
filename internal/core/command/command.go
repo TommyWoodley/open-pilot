@@ -13,6 +13,7 @@ const (
 	KindSessionList    = "session.list"
 	KindSessionNew     = "session.new"
 	KindSessionUse     = "session.use"
+	KindSessionDelete  = "session.delete"
 	KindSessionAddRepo = "session.add-repo"
 	KindSessionRepos   = "session.repos"
 	KindSessionRepoUse = "session.repo.use"
@@ -58,8 +59,11 @@ func Parse(input string) (Command, bool, error) {
 		if len(parts) >= 3 && parts[1] == "new" {
 			return Command{Kind: KindSessionNew, Session: strings.Join(parts[2:], " ")}, true, nil
 		}
-		if len(parts) == 3 && parts[1] == "use" {
-			return Command{Kind: KindSessionUse, SessionID: parts[2]}, true, nil
+		if len(parts) >= 3 && parts[1] == "use" {
+			return Command{Kind: KindSessionUse, SessionID: strings.Join(parts[2:], " ")}, true, nil
+		}
+		if len(parts) >= 3 && (parts[1] == "delete" || parts[1] == "remove" || parts[1] == "destroy") {
+			return Command{Kind: KindSessionDelete, SessionID: strings.Join(parts[2:], " ")}, true, nil
 		}
 		if len(parts) == 2 && parts[1] == "add-repo" {
 			return Command{Kind: KindSessionAddRepo}, true, nil
@@ -77,7 +81,7 @@ func Parse(input string) (Command, bool, error) {
 		if len(parts) == 4 && parts[1] == "repo" && parts[2] == "use" {
 			return Command{Kind: KindSessionRepoUse, RepoID: parts[3]}, true, nil
 		}
-		return Command{}, true, errors.New("usage: /session <new|list|use|add-repo <path>|repos|repo use>")
+		return Command{}, true, errors.New("usage: /session <new|list|use|delete|add-repo <path>|repos|repo use>")
 	default:
 		return Command{}, true, errors.New("unknown command; run /help")
 	}
@@ -88,7 +92,8 @@ func HelpText() string {
 		"Commands:",
 		"/session new <name> (auto-sets provider=codex and prompts repo step)",
 		"/session list",
-		"/session use <id>",
+		"/session use <name>",
+		"/session delete <name> (aliases: remove, destroy)",
 		"/session add-repo [path] [label] (empty path => current working directory)",
 		"/session repos",
 		"/session repo use <repo-id>",
@@ -111,7 +116,8 @@ func BaseSuggestions() []string {
 		"/provider use cursor",
 		"/session new <name>",
 		"/session list",
-		"/session use <session-id>",
+		"/session use <session-name>",
+		"/session delete <session-name>",
 		"/session add-repo [path] [label]",
 		"/session repos",
 		"/session repo use <repo-id>",

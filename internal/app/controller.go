@@ -33,6 +33,7 @@ func (m Model) processEnter() Model {
 	if isCommand && err == nil && cmd.Kind == corecommand.KindSessionNew {
 		m.Input = "/session add-repo "
 	}
+	m.consumeStoreWarning()
 	return m
 }
 
@@ -44,6 +45,7 @@ func (m *Model) runCommand(cmd Command) {
 	if cmd.Kind == corecommand.KindSessionNew {
 		m.Input = "/session add-repo "
 	}
+	m.consumeStoreWarning()
 }
 
 func helpText() string {
@@ -78,6 +80,7 @@ func (m *Model) handleProviderEvent(ev providers.Event) {
 	if m.AutoFollowTranscript {
 		m.TranscriptScroll = 0
 	}
+	m.consumeStoreWarning()
 }
 
 type providerEventMsg struct {
@@ -96,8 +99,8 @@ func waitProviderEvent(ch <-chan providers.Event) tea.Cmd {
 
 func (m *Model) applyAutocomplete() {
 	m.Input = m.autocomplete.Apply(m.Input, coreautocomplete.Options{
-		SessionIDs: m.store.SessionIDs(),
-		RepoIDs:    m.store.ActiveRepoIDs(),
+		SessionNames: m.store.SessionNames(),
+		RepoIDs:      m.store.ActiveRepoIDs(),
 	})
 }
 
@@ -107,8 +110,8 @@ func (m *Model) resetAutocomplete() {
 
 func (m *Model) commandSuggestions(input string) []string {
 	return m.autocomplete.Suggestions(input, coreautocomplete.Options{
-		SessionIDs: m.store.SessionIDs(),
-		RepoIDs:    m.store.ActiveRepoIDs(),
+		SessionNames: m.store.SessionNames(),
+		RepoIDs:      m.store.ActiveRepoIDs(),
 	})
 }
 
@@ -184,4 +187,10 @@ func (m *Model) listSessionsText() string {
 
 func (m *Model) listReposText() string {
 	return m.store.ListReposText()
+}
+
+func (m *Model) consumeStoreWarning() {
+	if warn := m.store.TakePersistenceWarning(); warn != "" {
+		m.StatusText = warn
+	}
 }

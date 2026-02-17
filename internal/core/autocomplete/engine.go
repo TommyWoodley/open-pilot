@@ -16,8 +16,8 @@ type Engine struct {
 }
 
 type Options struct {
-	SessionIDs []string
-	RepoIDs    []string
+	SessionNames []string
+	RepoIDs      []string
 }
 
 func (e *Engine) Reset() {
@@ -81,8 +81,9 @@ func (e *Engine) Suggestions(input string, opt Options) []string {
 	}
 
 	candidates := append([]string{}, command.BaseSuggestions()...)
-	for _, id := range opt.SessionIDs {
-		candidates = append(candidates, "/session use "+id)
+	for _, name := range opt.SessionNames {
+		candidates = append(candidates, "/session use "+name)
+		candidates = append(candidates, "/session delete "+name)
 	}
 	for _, repoID := range opt.RepoIDs {
 		candidates = append(candidates, "/session repo use "+repoID)
@@ -113,16 +114,21 @@ func tokenOptionsForContext(context []string, current string, opt Options) []str
 		case "/provider":
 			return []string{"status", "use"}
 		case "/session":
-			return []string{"add-repo", "list", "new", "repo", "repos", "use"}
+			return []string{"add-repo", "delete", "list", "new", "repo", "repos", "use"}
 		}
 	case 2:
 		if context[0] == "/provider" && context[1] == "use" {
 			return []string{"codex", "cursor"}
 		}
 		if context[0] == "/session" && context[1] == "use" {
-			ids := append([]string{}, opt.SessionIDs...)
-			sort.Strings(ids)
-			return ids
+			names := append([]string{}, opt.SessionNames...)
+			sort.Strings(names)
+			return names
+		}
+		if context[0] == "/session" && context[1] == "delete" {
+			names := append([]string{}, opt.SessionNames...)
+			sort.Strings(names)
+			return names
 		}
 		if context[0] == "/session" && context[1] == "repo" {
 			return []string{"use"}

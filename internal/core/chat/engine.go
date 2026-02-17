@@ -106,13 +106,26 @@ func (e *Engine) RunCommand(cmd command.Command) {
 	case command.KindHelp:
 		e.AddSystemMessage(command.HelpText())
 	case command.KindSessionNew:
-		s := e.Store.CreateSession(cmd.Session)
+		name := strings.TrimSpace(cmd.Session)
+		if name == "" {
+			e.AddSystemMessage("Session name is required: /session new <name>")
+			return
+		}
+		if e.Store.HasSessionName(name) {
+			e.AddSystemMessage("Session name already exists: " + name)
+			return
+		}
+		s := e.Store.CreateSession(name)
+		if s == nil {
+			e.AddSystemMessage("Failed to create session")
+			return
+		}
 		if pcfg, ok := e.Config.Providers["codex"]; ok && pcfg.Command != "" {
 			s.ProviderID = "codex"
 			e.ProviderState = "starting"
-			e.AddSystemMessage("Session " + s.ID + " created. Provider set to codex. Enter repo path.")
+			e.AddSystemMessage("Session " + s.Name + " created. Provider set to codex. Enter repo path.")
 		} else {
-			e.AddSystemMessage("Session " + s.ID + " created. Codex provider config missing; set provider manually.")
+			e.AddSystemMessage("Session " + s.Name + " created. Codex provider config missing; set provider manually.")
 		}
 	case command.KindSessionList:
 		e.AddSystemMessage(e.Store.ListSessionsText())
@@ -121,7 +134,17 @@ func (e *Engine) RunCommand(cmd command.Command) {
 			e.AddSystemMessage("Unknown session: " + cmd.SessionID)
 			return
 		}
-		e.AddSystemMessage("Using session " + cmd.SessionID)
+		if active := e.Store.ActiveSession(); active != nil {
+			e.AddSystemMessage("Using session " + active.Name)
+		} else {
+			e.AddSystemMessage("Using session " + cmd.SessionID)
+		}
+	case command.KindSessionDelete:
+		if !e.Store.DeleteSession(cmd.SessionID) {
+			e.AddSystemMessage("Unknown session: " + cmd.SessionID)
+			return
+		}
+		e.AddSystemMessage("Deleted session " + cmd.SessionID)
 	case command.KindSessionAddRepo:
 		if err := e.Store.AddRepoToActiveSession(cmd.RepoPath, cmd.RepoLabel); err != nil {
 			e.AddSystemMessage(err.Error())
