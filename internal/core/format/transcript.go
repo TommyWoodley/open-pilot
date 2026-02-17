@@ -138,6 +138,13 @@ func BuildTranscriptLines(messages []domain.Message, styles Styles) []string {
 			lines = append(lines, formatted.Prefix)
 		} else {
 			bodyLines := strings.Split(formatted.Body, "\n")
+			if msg.Role == domain.RoleSystem && isPilotDividerToken(bodyLines[0]) {
+				for _, line := range bodyLines {
+					lines = append(lines, line)
+				}
+				lines = append(lines, "")
+				continue
+			}
 			metaMask := classifyAgentMetaLines(msg, bodyLines)
 			if metaMask[0] && styles.AgentMeta != nil {
 				bodyLines[0] = styles.AgentMeta(bodyLines[0])
@@ -158,6 +165,11 @@ func BuildTranscriptLines(messages []domain.Message, styles Styles) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
+}
+
+func isPilotDividerToken(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "[[pilot-divider:") && strings.HasSuffix(trimmed, "]]")
 }
 
 func classifyAgentMetaLines(msg domain.Message, bodyLines []string) []bool {

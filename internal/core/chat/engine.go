@@ -252,21 +252,59 @@ func (e *Engine) runHooks(s *domain.Session, trigger config.HookTrigger, repoPat
 		s.LastHookRunAt = e.nowFn()
 		return
 	}
+	hookDefs := e.Config.BuiltinHooks.HooksFor(trigger)
+	hookIDs := make([]string, 0, len(hookDefs))
+	for _, hook := range hookDefs {
+		hookIDs = append(hookIDs, hook.ID)
+	}
+	if len(hookIDs) == 0 && strings.TrimSpace(e.Config.BuiltinHooksLoadError) == "" {
+		s.HooksBlocked = false
+		s.HooksBlockReason = ""
+		s.LastHookRunAt = e.nowFn()
+		e.StatusText = "Hooks passed"
+		return
+	}
+	progressID := e.Store.NextID("hooks-progress")
+	renderProgress := func(completed int, statuses map[string]string, runningID string) {
+		lines := []string{fmt.Sprintf("[[pilot-divider:Hooks %d/%d]]", completed, len(hookIDs))}
+		for _, id := range hookIDs {
+			status := statuses[id]
+			if status == "" {
+				status = "pending"
+			}
+			if id == runningID && status == "pending" {
+				status = "running"
+			}
+			lines = append(lines, fmt.Sprintf("%s: %s", id, status))
+		}
+		lines = append(lines, "[[pilot-divider:]]")
+		e.upsertItemMessageWithRole(s.ID, progressID, strings.Join(lines, "\n"), domain.RoleSystem)
+	}
+	statuses := make(map[string]string, len(hookIDs))
+	runningID := ""
 	e.StatusText = "Running hooks..."
-	result := e.Hooks.Run(context.Background(), trigger, s.ID, repoPath)
+	renderProgress(0, statuses, runningID)
+	onUpdate := func(update corehooks.ProgressUpdate) {
+		if strings.TrimSpace(update.HookID) == "" {
+			return
+		}
+		switch update.Status {
+		case "running":
+			statuses[update.HookID] = "running"
+			renderProgress(update.Completed, statuses, update.HookID)
+		case "passed":
+			statuses[update.HookID] = "passed"
+			renderProgress(update.Completed, statuses, "")
+		default:
+			statuses[update.HookID] = "failed (" + update.Status + ")"
+			renderProgress(update.Completed, statuses, "")
+		}
+	}
+	result := e.Hooks.Run(context.Background(), trigger, s.ID, repoPath, onUpdate)
 	s.LastHookRunAt = e.nowFn()
-	e.AddSystemMessage(fmt.Sprintf("Running hooks (%d)...", result.HooksMatched))
-	for _, hookResult := range result.PerHookResults {
-		e.AddSystemMessage("Hook start: " + hookResult.HookID)
-		if hookResult.Passed {
-			e.AddSystemMessage("Hook passed: " + hookResult.HookID)
-			continue
-		}
-		if hookResult.HookID == result.FailedHookID && result.FailedCommandIndex > 0 {
-			e.AddSystemMessage(fmt.Sprintf("Hook failed: %s (command %d, %s)", hookResult.HookID, result.FailedCommandIndex, hookResult.Reason))
-		} else {
-			e.AddSystemMessage("Hook failed: " + hookResult.HookID + " (" + hookResult.Reason + ")")
-		}
+	if !result.Passed && result.FailedHookID != "" && result.FailedCommandIndex > 0 {
+		statuses[result.FailedHookID] = fmt.Sprintf("failed (command %d, %s)", result.FailedCommandIndex, result.Reason)
+		renderProgress(len(result.PerHookResults), statuses, "")
 	}
 	if result.Passed {
 		s.HooksBlocked = false
@@ -456,6 +494,10 @@ func (e *Engine) handleCommandExecutionEvent(sessionID string, ev providers.Even
 }
 
 func (e *Engine) upsertItemMessage(sessionID, itemID, content string) {
+	e.upsertItemMessageWithRole(sessionID, itemID, content, domain.RoleAssistant)
+}
+
+func (e *Engine) upsertItemMessageWithRole(sessionID, itemID, content, role string) {
 	key := itemRefKey(sessionID, itemID)
 	if ref, ok := e.itemRefs[key]; ok {
 		if e.Store.ReplaceMessageAt(ref.SessionID, ref.Index, content) {
@@ -463,7 +505,12 @@ func (e *Engine) upsertItemMessage(sessionID, itemID, content string) {
 		}
 		delete(e.itemRefs, key)
 	}
-	idx := e.Store.AppendAssistantMessage(sessionID, content)
+	idx := -1
+	if role == domain.RoleSystem {
+		idx = e.Store.AppendSystemMessage(sessionID, content)
+	} else {
+		idx = e.Store.AppendAssistantMessage(sessionID, content)
+	}
 	if idx >= 0 {
 		e.itemRefs[key] = pendingRef{SessionID: sessionID, Index: idx}
 	}

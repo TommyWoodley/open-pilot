@@ -25,7 +25,7 @@ type fakeHooks struct {
 	lastRepoPath string
 }
 
-func (f *fakeHooks) Run(_ context.Context, trigger config.HookTrigger, _ string, repoPath string) corehooks.RunResult {
+func (f *fakeHooks) Run(_ context.Context, trigger config.HookTrigger, _ string, repoPath string, _ func(corehooks.ProgressUpdate)) corehooks.RunResult {
 	f.calls++
 	f.lastTrigger = trigger
 	f.lastRepoPath = repoPath
@@ -443,7 +443,13 @@ func TestHandleProviderTurnUsageIsNotRendered(t *testing.T) {
 
 func TestSessionNewRunsStartupHooksAndBlocksPromptOnFailure(t *testing.T) {
 	store := session.NewStore()
-	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	cfg := config.Default()
+	cfg.BuiltinHooks = config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{ID: "ensure-branch", Triggers: []config.HookTrigger{config.HookTriggerSessionStarted}, Execute: []string{"echo ok"}, Timeout: time.Second},
+		},
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
 	eng.Hooks = &fakeHooks{
 		result: corehooks.RunResult{
 			Passed:             false,
@@ -474,7 +480,13 @@ func TestSessionNewRunsStartupHooksAndBlocksPromptOnFailure(t *testing.T) {
 
 func TestHooksRunClearsBlockedStateOnSuccess(t *testing.T) {
 	store := session.NewStore()
-	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	cfg := config.Default()
+	cfg.BuiltinHooks = config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{ID: "ensure-branch", Triggers: []config.HookTrigger{config.HookTriggerSessionStarted}, Execute: []string{"echo ok"}, Timeout: time.Second},
+		},
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
 	h := &fakeHooks{
 		result: corehooks.RunResult{
 			Passed:       false,
@@ -511,7 +523,13 @@ func TestHooksRunClearsBlockedStateOnSuccess(t *testing.T) {
 
 func TestSessionUseDoesNotAutoRunHooks(t *testing.T) {
 	store := session.NewStore()
-	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	cfg := config.Default()
+	cfg.BuiltinHooks = config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{ID: "ensure-branch", Triggers: []config.HookTrigger{config.HookTriggerSessionStarted}, Execute: []string{"echo ok"}, Timeout: time.Second},
+		},
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
 	h := &fakeHooks{
 		result: corehooks.RunResult{Passed: true},
 	}
@@ -529,7 +547,13 @@ func TestSessionUseDoesNotAutoRunHooks(t *testing.T) {
 
 func TestSessionAddRepoRunsRepoAddedHooks(t *testing.T) {
 	store := session.NewStore()
-	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	cfg := config.Default()
+	cfg.BuiltinHooks = config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{ID: "sync-main-or-master-on-repo-add", Triggers: []config.HookTrigger{config.HookTriggerRepoAdded}, Execute: []string{"echo ok"}, Timeout: time.Second},
+		},
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
 	h := &fakeHooks{
 		result: corehooks.RunResult{Passed: true},
 	}
@@ -547,5 +571,13 @@ func TestSessionAddRepoRunsRepoAddedHooks(t *testing.T) {
 	}
 	if strings.TrimSpace(h.lastRepoPath) == "" {
 		t.Fatalf("expected repo path to be passed to hook runner")
+	}
+	msgs := store.ActiveSession().Messages
+	if len(msgs) == 0 {
+		t.Fatalf("expected hook progress message")
+	}
+	last := msgs[len(msgs)-1]
+	if last.Role != "system" {
+		t.Fatalf("expected hook progress to render as pilot/system message, got role=%q", last.Role)
 	}
 }

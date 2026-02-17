@@ -28,7 +28,7 @@ func TestRunExecutesCommandsInOrder(t *testing.T) {
 		},
 	}, "")
 
-	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "")
+	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got failure: %#v", result)
 	}
@@ -54,7 +54,7 @@ func TestRunStopsOnNonZeroExit(t *testing.T) {
 		},
 	}, "")
 
-	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "")
+	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
 	if result.Passed {
 		t.Fatalf("expected failure")
 	}
@@ -78,7 +78,7 @@ func TestRunReturnsTimeoutReason(t *testing.T) {
 		},
 	}, "")
 
-	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "")
+	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
 	if result.Passed {
 		t.Fatalf("expected timeout failure")
 	}
@@ -104,7 +104,7 @@ func TestRunSetsEnvOnCommand(t *testing.T) {
 		},
 	}, "")
 
-	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "")
+	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -131,7 +131,7 @@ func TestRunSetsRepoPathEnvOnCommand(t *testing.T) {
 		},
 	}, "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "/tmp/my-repo")
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "/tmp/my-repo", nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -146,7 +146,7 @@ func TestRunSetsRepoPathEnvOnCommand(t *testing.T) {
 
 func TestRunFailsClosedOnLoadError(t *testing.T) {
 	svc := NewService(config.HookCatalog{}, "broken yaml")
-	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "")
+	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
 	if result.Passed {
 		t.Fatalf("expected fail-closed")
 	}

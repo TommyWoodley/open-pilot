@@ -317,6 +317,21 @@ func (s *Store) AddAssistantMessage(sessionID, text string) {
 	_ = s.AppendAssistantMessage(sessionID, text)
 }
 
+func (s *Store) AppendSystemMessage(sessionID, text string) int {
+	ss := s.Sessions[sessionID]
+	if ss == nil {
+		return -1
+	}
+	ss.Messages = append(ss.Messages, domain.Message{
+		ID:        s.NextID("msg"),
+		Role:      domain.RoleSystem,
+		Content:   text,
+		Timestamp: s.Now(),
+	})
+	s.saveIfEnabled()
+	return len(ss.Messages) - 1
+}
+
 func (s *Store) AppendAssistantMessage(sessionID, text string) int {
 	ss := s.Sessions[sessionID]
 	if ss == nil {

@@ -13,7 +13,14 @@ import (
 )
 
 type Service interface {
-	Run(ctx context.Context, trigger config.HookTrigger, sessionID, repoPath string) RunResult
+	Run(ctx context.Context, trigger config.HookTrigger, sessionID, repoPath string, onUpdate func(ProgressUpdate)) RunResult
+}
+
+type ProgressUpdate struct {
+	HookID    string
+	Status    string
+	Completed int
+	Total     int
 }
 
 type RunResult struct {
@@ -46,7 +53,7 @@ func NewService(catalog config.HookCatalog, loadError string) Service {
 	}
 }
 
-func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID, repoPath string) RunResult {
+func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID, repoPath string, onUpdate func(ProgressUpdate)) RunResult {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -65,9 +72,18 @@ func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID,
 
 	hooks := r.catalog.HooksFor(trigger)
 	result.HooksMatched = len(hooks)
-	for _, hook := range hooks {
+	total := len(hooks)
+	for i, hook := range hooks {
 		hookResult := HookResult{HookID: hook.ID}
-		for i, command := range hook.Execute {
+		if onUpdate != nil {
+			onUpdate(ProgressUpdate{
+				HookID:    hook.ID,
+				Status:    "running",
+				Completed: i,
+				Total:     total,
+			})
+		}
+		for cmdIdx, command := range hook.Execute {
 			cmdCtx, cancel := context.WithTimeout(ctx, hook.Timeout)
 			cmd := exec.CommandContext(cmdCtx, "bash", "-lc", command)
 			cmd.Env = append(os.Environ(), runtimeEnv(sessionID, repoPath)...)
@@ -92,8 +108,16 @@ func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID,
 				result.PerHookResults = append(result.PerHookResults, hookResult)
 				result.Passed = false
 				result.FailedHookID = hook.ID
-				result.FailedCommandIndex = i + 1
+				result.FailedCommandIndex = cmdIdx + 1
 				result.Reason = hookResult.Reason
+				if onUpdate != nil {
+					onUpdate(ProgressUpdate{
+						HookID:    hook.ID,
+						Status:    hookResult.Reason,
+						Completed: i + 1,
+						Total:     total,
+					})
+				}
 				result.CompletedAt = time.Now()
 				return result
 			}
@@ -101,6 +125,14 @@ func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID,
 		}
 		hookResult.Passed = true
 		result.PerHookResults = append(result.PerHookResults, hookResult)
+		if onUpdate != nil {
+			onUpdate(ProgressUpdate{
+				HookID:    hook.ID,
+				Status:    "passed",
+				Completed: i + 1,
+				Total:     total,
+			})
+		}
 	}
 	result.CompletedAt = time.Now()
 	return result

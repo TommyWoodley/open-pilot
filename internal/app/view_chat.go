@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/thwoodle/open-pilot/internal/core/format"
 	"github.com/thwoodle/open-pilot/internal/ui"
@@ -80,6 +81,11 @@ func wrapTranscriptLines(lines []string, width int) []string {
 		if contentWidth < 1 {
 			contentWidth = 1
 		}
+		if title, ok := parsePilotDividerTitle(content); ok {
+			prefix := strings.Repeat(" ", indent)
+			out = append(out, prefix+renderPilotDividerLine(title, contentWidth))
+			continue
+		}
 		wrapped := ansi.Hardwrap(content, contentWidth, false)
 		parts := strings.Split(wrapped, "\n")
 		prefix := strings.Repeat(" ", indent)
@@ -88,6 +94,49 @@ func wrapTranscriptLines(lines []string, width int) []string {
 		}
 	}
 	return out
+}
+
+func parsePilotDividerTitle(content string) (string, bool) {
+	const prefix = "[[pilot-divider:"
+	const suffix = "]]"
+	if !strings.HasPrefix(content, prefix) || !strings.HasSuffix(content, suffix) {
+		return "", false
+	}
+	title := strings.TrimSpace(content[len(prefix) : len(content)-len(suffix)])
+	return title, true
+}
+
+func renderPilotDividerLine(title string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if strings.TrimSpace(title) == "" {
+		return ui.HookDividerLineStyle.Render(strings.Repeat("─", width))
+	}
+	label := " " + strings.TrimSpace(title) + " "
+	labelWidth := lipgloss.Width(label)
+	if labelWidth >= width {
+		return ui.HookDividerTitleStyle.Render(truncateVisible(label, width))
+	}
+	left := (width - labelWidth) / 2
+	right := width - labelWidth - left
+	return ui.HookDividerLineStyle.Render(strings.Repeat("─", left)) +
+		ui.HookDividerTitleStyle.Render(label) +
+		ui.HookDividerLineStyle.Render(strings.Repeat("─", right))
+}
+
+func truncateVisible(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	runes := []rune(s)
+	if width == 1 {
+		return "…"
+	}
+	return string(runes[:width-1]) + "…"
 }
 
 func leadingSpaces(s string) int {

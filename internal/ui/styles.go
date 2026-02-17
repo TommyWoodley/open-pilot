@@ -26,6 +26,13 @@ var (
 			Foreground(lipgloss.Color("241")).
 			Padding(0, 1)
 
+	HookDividerLineStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("66"))
+
+	HookDividerTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("110"))
+
 	TranscriptUserPrefixStyle = lipgloss.NewStyle().
 					Bold(true).
 					Foreground(lipgloss.Color("81"))

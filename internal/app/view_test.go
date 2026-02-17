@@ -331,3 +331,27 @@ func TestWrappedCommandOutputKeepsContinuationIndent(t *testing.T) {
 		}
 	}
 }
+
+func TestHookDividerTokenRendersStyledCenteredLine(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	m.Width = 100
+	m.Height = 24
+	s.Messages = append(s.Messages, domain.Message{
+		ID:      "msg-hooks-divider",
+		Role:    domain.RoleSystem,
+		Content: "Hooks 0/1\n[[pilot-divider:Hooks 0/1]]",
+	})
+
+	lines := m.displayTranscriptLines()
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "[[pilot-divider:") {
+		t.Fatalf("expected divider token to be rendered, got %q", joined)
+	}
+	if !strings.Contains(joined, "Hooks 0/1") {
+		t.Fatalf("expected divider title to be visible, got %q", joined)
+	}
+}
