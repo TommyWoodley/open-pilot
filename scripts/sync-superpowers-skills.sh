@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REF="${1:-main}"
-OWNER_REPO="obra/superpowers"
+OWNER_REPO="TommyWoodley/pilot-superpowers"
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -16,7 +16,11 @@ curl -fsSL "https://github.com/${OWNER_REPO}/archive/refs/heads/${REF}.tar.gz" -
 mkdir -p "$extract_dir"
 tar -xzf "$archive" -C "$extract_dir"
 
-src_root="$extract_dir/superpowers-${REF}"
+src_root="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+if [[ -z "${src_root:-}" || ! -d "$src_root" ]]; then
+  echo "Unable to detect extracted repository root in: $extract_dir" >&2
+  exit 1
+fi
 src_skills_dir="$src_root/skills"
 if [[ ! -d "$src_skills_dir" ]]; then
   echo "Expected skills directory not found in downloaded archive: $src_skills_dir" >&2
