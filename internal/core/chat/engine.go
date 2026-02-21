@@ -258,6 +258,11 @@ func (e *Engine) RunCommand(cmd command.Command) {
 			return
 		}
 		e.AddSystemMessage("Active repo set")
+		if s := e.Store.ActiveSession(); s != nil {
+			if repo := e.Store.ActiveRepo(); repo != nil {
+				e.runHooks(s, config.HookTriggerRepoSelected, repo.Path)
+			}
+		}
 	case command.KindProviderUse:
 		if cmd.ProviderID != "codex" && cmd.ProviderID != "cursor" {
 			e.AddSystemMessage("Unsupported provider: " + cmd.ProviderID)

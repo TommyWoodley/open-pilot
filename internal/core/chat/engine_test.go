@@ -748,6 +748,45 @@ func TestSessionAddRepoRunsRepoAddedHooks(t *testing.T) {
 	}
 }
 
+func TestSessionRepoUseRunsRepoSelectedHooks(t *testing.T) {
+	store := session.NewStore()
+	cfg := config.Default()
+	cfg.BuiltinHooks = config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{ID: "open-development-branch", Triggers: []config.HookTrigger{config.HookTriggerRepoSelected}, Execute: []string{"echo ok"}, Timeout: time.Second},
+		},
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
+	h := &fakeHooks{
+		result: corehooks.RunResult{Passed: true},
+	}
+	eng.Hooks = h
+
+	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "demo"})
+	eng.RunCommand(command.Command{Kind: command.KindSessionAddRepo, RepoPath: t.TempDir()})
+	eng.RunCommand(command.Command{Kind: command.KindSessionAddRepo, RepoPath: t.TempDir()})
+
+	s := store.ActiveSession()
+	if s == nil || len(s.Repos) < 2 {
+		t.Fatalf("expected session with at least two repos")
+	}
+	repoID := s.Repos[0].ID
+	repoPath := s.Repos[0].Path
+	callsBeforeRepoUse := h.calls
+
+	eng.RunCommand(command.Command{Kind: command.KindSessionRepoUse, RepoID: repoID})
+
+	if h.calls != callsBeforeRepoUse+1 {
+		t.Fatalf("expected one additional hook run on /session repo use, before=%d after=%d", callsBeforeRepoUse, h.calls)
+	}
+	if h.lastTrigger != config.HookTriggerRepoSelected {
+		t.Fatalf("expected repo.selected trigger, got %q", h.lastTrigger)
+	}
+	if h.lastRepoPath != repoPath {
+		t.Fatalf("expected repo path %q, got %q", repoPath, h.lastRepoPath)
+	}
+}
+
 func TestProviderUseCodexRunsProviderCodexSelectedHooks(t *testing.T) {
 	store := session.NewStore()
 	cfg := config.Default()

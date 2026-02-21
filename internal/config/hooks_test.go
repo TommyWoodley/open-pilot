@@ -90,6 +90,29 @@ execute:
 	}
 }
 
+func TestLoadBuiltinHooksParsesRepoSelectedTrigger(t *testing.T) {
+	dir := t.TempDir()
+	writeHookFile(t, dir, "a.yaml", `
+version: 1
+id: repo-selected-hook
+triggers:
+  - repo.selected
+execute:
+  - echo ok
+`)
+
+	catalog, err := LoadBuiltinHooks(dir)
+	if err != nil {
+		t.Fatalf("expected load success, got error: %v", err)
+	}
+	if len(catalog.Hooks) != 1 {
+		t.Fatalf("expected one hook, got %d", len(catalog.Hooks))
+	}
+	if catalog.Hooks[0].Triggers[0] != HookTriggerRepoSelected {
+		t.Fatalf("unexpected trigger: %q", catalog.Hooks[0].Triggers[0])
+	}
+}
+
 func TestLoadBuiltinHooksRejectsDuplicateID(t *testing.T) {
 	dir := t.TempDir()
 	content := `
@@ -190,6 +213,24 @@ func TestBuiltinHooksIncludeOpenDevelopmentBranch(t *testing.T) {
 	if !slices.Contains(ids, "open-development-branch") {
 		t.Fatalf("expected builtin hook id open-development-branch, got ids=%v", ids)
 	}
+}
+
+func TestBuiltinOpenDevelopmentBranchUsesRepoSelectedTrigger(t *testing.T) {
+	dir := Default().BuiltinHooksDir
+	catalog, err := LoadBuiltinHooks(dir)
+	if err != nil {
+		t.Fatalf("load builtin hooks: %v", err)
+	}
+	for _, h := range catalog.Hooks {
+		if h.ID != "open-development-branch" {
+			continue
+		}
+		if len(h.Triggers) != 1 || h.Triggers[0] != HookTriggerRepoSelected {
+			t.Fatalf("expected open-development-branch trigger %q, got %#v", HookTriggerRepoSelected, h.Triggers)
+		}
+		return
+	}
+	t.Fatalf("expected builtin hook id open-development-branch")
 }
 
 func TestBuiltinHookInstallSkillsPullsSuperpowersFromGitHubMain(t *testing.T) {
