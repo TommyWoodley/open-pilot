@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -553,6 +554,7 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 		} else {
 			e.Store.AddAssistantMessage(ev.SessionID, ev.Text)
 		}
+		e.runDevelopmentWorkCompleteHooksForContent(s, ev.Text)
 		e.ProviderState = "ready"
 		e.StatusText = "Response complete"
 	case providers.EventError:
@@ -586,6 +588,7 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 		} else {
 			e.Store.AddAssistantMessage(s.ID, text)
 		}
+		e.runDevelopmentWorkCompleteHooksForContent(s, ev.Text)
 	case providers.EventCommandExecution:
 		e.handleCommandExecutionEvent(s.ID, ev)
 	case providers.EventTurnUsage:
@@ -617,6 +620,41 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 		}
 		e.StatusText = "Unhandled provider event: " + rawType + " (logged)"
 	}
+}
+
+func (e *Engine) runDevelopmentWorkCompleteHooksForContent(s *domain.Session, content string) {
+	if s == nil {
+		return
+	}
+	count := countDevelopmentWorkCompleteTags(content)
+	if count <= 0 {
+		return
+	}
+	repoPath := e.repoPathForSession(s)
+	for i := 0; i < count; i++ {
+		e.runHooks(s, config.HookTriggerDevelopmentWorkComplete, repoPath)
+	}
+}
+
+func (e *Engine) repoPathForSession(s *domain.Session) string {
+	if s == nil || strings.TrimSpace(s.ActiveRepoID) == "" {
+		return ""
+	}
+	for i := range s.Repos {
+		if s.Repos[i].ID == s.ActiveRepoID {
+			return s.Repos[i].Path
+		}
+	}
+	return ""
+}
+
+var developmentWorkCompleteOccurrenceRegex = regexp.MustCompile(`\[(?:<)?DEVELOPMENT_WORK_COMPLETE(?:>)?\]|<DEVELOPMENT_WORK_COMPLETE>`)
+
+func countDevelopmentWorkCompleteTags(content string) int {
+	if strings.TrimSpace(content) == "" {
+		return 0
+	}
+	return len(developmentWorkCompleteOccurrenceRegex.FindAllStringIndex(content, -1))
 }
 
 func (e *Engine) handleCommandExecutionEvent(sessionID string, ev providers.Event) {

@@ -187,6 +187,9 @@ func normalizeTranscriptSectionTag(line string) string {
 	if matches := sectionEndTagRegex.FindStringSubmatch(trimmed); len(matches) == 2 {
 		return "[[pilot-divider:]]"
 	}
+	if developmentWorkCompleteTagRegex.MatchString(trimmed) || developmentWorkCompleteAngleTagRegex.MatchString(trimmed) {
+		return "[[pilot-divider:Development Work Complete]]"
+	}
 	return line
 }
 
@@ -203,7 +206,10 @@ func formatTranscriptSectionTitle(raw string) string {
 }
 
 func isTranscriptSectionTag(line string) bool {
-	return sectionStartTagRegex.MatchString(line) || sectionEndTagRegex.MatchString(line)
+	return sectionStartTagRegex.MatchString(line) ||
+		sectionEndTagRegex.MatchString(line) ||
+		developmentWorkCompleteTagRegex.MatchString(strings.TrimSpace(line)) ||
+		developmentWorkCompleteAngleTagRegex.MatchString(strings.TrimSpace(line))
 }
 
 func classifyAgentMetaLines(msg domain.Message, bodyLines []string) []bool {
@@ -254,6 +260,8 @@ var completedCommandSummaryRegex = regexp.MustCompile(`^Ran .+ for .+`)
 var exploredCommandSummaryRegex = regexp.MustCompile(`^Explored(?: \d+ commands)? for .+`)
 var sectionStartTagRegex = regexp.MustCompile(`^<([A-Z0-9_]+)_START>$`)
 var sectionEndTagRegex = regexp.MustCompile(`^<([A-Z0-9_]+)_END>$`)
+var developmentWorkCompleteTagRegex = regexp.MustCompile(`^\[(?:<)?DEVELOPMENT_WORK_COMPLETE(?:>)?\]$`)
+var developmentWorkCompleteAngleTagRegex = regexp.MustCompile(`^<DEVELOPMENT_WORK_COMPLETE>$`)
 
 func visibleTextWidth(s string) int {
 	plain := sgrANSIRegex.ReplaceAllString(s, "")
