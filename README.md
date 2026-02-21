@@ -39,7 +39,7 @@ go build ./cmd/open-pilot
 - One YAML file defines one hook.
 - Supported triggers right now:
   - `session.started` (runs on `/session new` and can be rerun with `/hooks run`)
-  - `repo.added` (runs on `/session add-repo`)
+  - `repo.selected` (runs on `/session add-repo`, `/session repo use`, and `/session use` when an active repo exists)
   - `provider.codex.selected` (runs on `/provider use codex` and on `/session new` when codex is default)
 - `install-builtin-skills-on-codex-select` pulls superpowers skills from GitHub (`TommyWoodley/pilot-superpowers@main`) and installs them into `~/.codex/skills`.
 

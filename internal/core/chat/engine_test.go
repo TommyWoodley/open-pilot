@@ -687,12 +687,12 @@ func TestHooksRunClearsBlockedStateOnSuccess(t *testing.T) {
 	}
 }
 
-func TestSessionUseDoesNotAutoRunHooks(t *testing.T) {
+func TestSessionUseRunsRepoSelectedHooksWhenActiveRepoExists(t *testing.T) {
 	store := session.NewStore()
 	cfg := config.Default()
 	cfg.BuiltinHooks = config.HookCatalog{
 		Hooks: []config.HookDefinition{
-			{ID: "ensure-branch", Triggers: []config.HookTrigger{config.HookTriggerSessionStarted}, Execute: []string{"echo ok"}, Timeout: time.Second},
+			{ID: "open-development-branch", Triggers: []config.HookTrigger{config.HookTriggerRepoSelected}, Execute: []string{"echo ok"}, Timeout: time.Second},
 		},
 	}
 	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
@@ -702,21 +702,34 @@ func TestSessionUseDoesNotAutoRunHooks(t *testing.T) {
 	eng.Hooks = h
 
 	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "one"})
+	eng.RunCommand(command.Command{Kind: command.KindSessionAddRepo, RepoPath: t.TempDir()})
+	s1 := store.ActiveSession()
+	if s1 == nil || s1.ActiveRepoID == "" {
+		t.Fatalf("expected first session with active repo")
+	}
+	repoPath := store.ActiveRepo().Path
 	eng.RunCommand(command.Command{Kind: command.KindSessionNew, Session: "two"})
-	callsAfterNew := h.calls
+	callsAfterSetup := h.calls
+
 	eng.RunCommand(command.Command{Kind: command.KindSessionUse, SessionID: "one"})
 
-	if h.calls != callsAfterNew {
-		t.Fatalf("expected /session use to not run hooks, before=%d after=%d", callsAfterNew, h.calls)
+	if h.calls != callsAfterSetup+1 {
+		t.Fatalf("expected /session use to run repo.selected hooks once, before=%d after=%d", callsAfterSetup, h.calls)
+	}
+	if h.lastTrigger != config.HookTriggerRepoSelected {
+		t.Fatalf("expected repo.selected trigger, got %q", h.lastTrigger)
+	}
+	if h.lastRepoPath != repoPath {
+		t.Fatalf("expected repo path %q, got %q", repoPath, h.lastRepoPath)
 	}
 }
 
-func TestSessionAddRepoRunsRepoAddedHooks(t *testing.T) {
+func TestSessionAddRepoRunsRepoSelectedHooks(t *testing.T) {
 	store := session.NewStore()
 	cfg := config.Default()
 	cfg.BuiltinHooks = config.HookCatalog{
 		Hooks: []config.HookDefinition{
-			{ID: "open-development-branch", Triggers: []config.HookTrigger{config.HookTriggerRepoAdded}, Execute: []string{"echo ok"}, Timeout: time.Second},
+			{ID: "open-development-branch", Triggers: []config.HookTrigger{config.HookTriggerRepoSelected}, Execute: []string{"echo ok"}, Timeout: time.Second},
 		},
 	}
 	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
@@ -732,8 +745,8 @@ func TestSessionAddRepoRunsRepoAddedHooks(t *testing.T) {
 	if h.calls != callsAfterSessionNew+1 {
 		t.Fatalf("expected one additional hook run on add-repo, before=%d after=%d", callsAfterSessionNew, h.calls)
 	}
-	if h.lastTrigger != config.HookTriggerRepoAdded {
-		t.Fatalf("expected repo.added trigger, got %q", h.lastTrigger)
+	if h.lastTrigger != config.HookTriggerRepoSelected {
+		t.Fatalf("expected repo.selected trigger, got %q", h.lastTrigger)
 	}
 	if strings.TrimSpace(h.lastRepoPath) == "" {
 		t.Fatalf("expected repo path to be passed to hook runner")

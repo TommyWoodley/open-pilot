@@ -44,7 +44,7 @@ env:
 	}
 }
 
-func TestLoadBuiltinHooksParsesRepoAddedTrigger(t *testing.T) {
+func TestLoadBuiltinHooksRejectsRepoAddedTrigger(t *testing.T) {
 	dir := t.TempDir()
 	writeHookFile(t, dir, "a.yaml", `
 version: 1
@@ -55,15 +55,9 @@ execute:
   - echo ok
 `)
 
-	catalog, err := LoadBuiltinHooks(dir)
-	if err != nil {
-		t.Fatalf("expected load success, got error: %v", err)
-	}
-	if len(catalog.Hooks) != 1 {
-		t.Fatalf("expected one hook, got %d", len(catalog.Hooks))
-	}
-	if catalog.Hooks[0].Triggers[0] != HookTriggerRepoAdded {
-		t.Fatalf("unexpected trigger: %q", catalog.Hooks[0].Triggers[0])
+	_, err := LoadBuiltinHooks(dir)
+	if err == nil || !strings.Contains(err.Error(), "unsupported trigger") {
+		t.Fatalf("expected unsupported trigger error, got: %v", err)
 	}
 }
 

@@ -126,14 +126,14 @@ func TestRunSetsSessionAndRepoEnvOnCommand(t *testing.T) {
 		Hooks: []config.HookDefinition{
 			{
 				ID:       "repo-env",
-				Triggers: []config.HookTrigger{config.HookTriggerRepoAdded},
+				Triggers: []config.HookTrigger{config.HookTriggerRepoSelected},
 				Execute:  []string{"echo $OPEN_PILOT_SESSION_ID,$OPEN_PILOT_SESSION_NAME,$OPEN_PILOT_REPO_PATH > " + target},
 				Timeout:  time.Second,
 			},
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "Feature 123", "/tmp/my-repo", nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoSelected, "s-1", "Feature 123", "/tmp/my-repo", nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -263,14 +263,14 @@ func TestRepoAddedOpenDevelopmentBranchCreatesNormalizedBranchFromSyncedBase(t *
 		Hooks: []config.HookDefinition{
 			{
 				ID:       "open-development-branch",
-				Triggers: []config.HookTrigger{config.HookTriggerRepoAdded},
+				Triggers: []config.HookTrigger{config.HookTriggerRepoSelected},
 				Execute:  []string{"bash " + shellQuote(script)},
 				Timeout:  time.Second * 10,
 			},
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "Feature 123/ABC", repo, nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoSelected, "s-1", "Feature 123/ABC", repo, nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -310,14 +310,14 @@ func TestRepoAddedOpenDevelopmentBranchUsesMasterWhenMainMissing(t *testing.T) {
 		Hooks: []config.HookDefinition{
 			{
 				ID:       "open-development-branch",
-				Triggers: []config.HookTrigger{config.HookTriggerRepoAdded},
+				Triggers: []config.HookTrigger{config.HookTriggerRepoSelected},
 				Execute:  []string{"bash " + shellQuote(script)},
 				Timeout:  time.Second * 10,
 			},
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "Master Session", repo, nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoSelected, "s-1", "Master Session", repo, nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -383,14 +383,14 @@ func TestRepoAddedOpenDevelopmentBranchExistingSessionBranchSyncsUpstreamOnly(t 
 		Hooks: []config.HookDefinition{
 			{
 				ID:       "open-development-branch",
-				Triggers: []config.HookTrigger{config.HookTriggerRepoAdded},
+				Triggers: []config.HookTrigger{config.HookTriggerRepoSelected},
 				Execute:  []string{"bash " + shellQuote(script)},
 				Timeout:  time.Second * 10,
 			},
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "Feature 123", repo, nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoSelected, "s-1", "Feature 123", repo, nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -426,14 +426,14 @@ func TestRepoAddedOpenDevelopmentBranchNoRemoteCreatesSessionBranchFromHEAD(t *t
 			{
 				ID:         "open-development-branch",
 				SourcePath: "/tmp/open-development-branch.yaml",
-				Triggers:   []config.HookTrigger{config.HookTriggerRepoAdded},
+				Triggers:   []config.HookTrigger{config.HookTriggerRepoSelected},
 				Execute:    []string{"bash " + shellQuote(script)},
 				Timeout:    time.Second * 10,
 			},
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "No Remote Session", repo, nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoSelected, "s-1", "No Remote Session", repo, nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -462,14 +462,14 @@ func TestRepoAddedOpenDevelopmentBranchUsesSessionNameNotSessionID(t *testing.T)
 			{
 				ID:         "open-development-branch",
 				SourcePath: "/tmp/open-development-branch.yaml",
-				Triggers:   []config.HookTrigger{config.HookTriggerRepoAdded},
+				Triggers:   []config.HookTrigger{config.HookTriggerRepoSelected},
 				Execute:    []string{"bash " + shellQuote(script)},
 				Timeout:    time.Second * 10,
 			},
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "session-123", "Feature Session", repo, nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoSelected, "session-123", "Feature Session", repo, nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -506,14 +506,14 @@ func TestRepoAddedOpenDevelopmentBranchNoMainOrMasterIsNoop(t *testing.T) {
 		Hooks: []config.HookDefinition{
 			{
 				ID:       "open-development-branch",
-				Triggers: []config.HookTrigger{config.HookTriggerRepoAdded},
+				Triggers: []config.HookTrigger{config.HookTriggerRepoSelected},
 				Execute:  []string{"bash " + shellQuote(script)},
 				Timeout:  time.Second * 10,
 			},
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "Develop Session", repo, nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoSelected, "s-1", "Develop Session", repo, nil)
 	if !result.Passed {
 		t.Fatalf("expected pass/noop, got %#v", result)
 	}

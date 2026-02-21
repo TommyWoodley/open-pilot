@@ -14,7 +14,6 @@ const defaultHookTimeout = 30 * time.Second
 type HookTrigger string
 
 const HookTriggerSessionStarted HookTrigger = "session.started"
-const HookTriggerRepoAdded HookTrigger = "repo.added"
 const HookTriggerRepoSelected HookTrigger = "repo.selected"
 const HookTriggerProviderCodexSelected HookTrigger = "provider.codex.selected"
 
@@ -108,7 +107,6 @@ func validateHook(hook HookDefinition) error {
 	}
 	for _, trigger := range hook.Triggers {
 		if trigger != HookTriggerSessionStarted &&
-			trigger != HookTriggerRepoAdded &&
 			trigger != HookTriggerRepoSelected &&
 			trigger != HookTriggerProviderCodexSelected {
 			return fmt.Errorf("unsupported trigger %q", trigger)

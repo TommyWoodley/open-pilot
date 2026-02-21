@@ -1,6 +1,6 @@
 version: 1
 id: open-development-branch
-description: Open or create a session development branch on repo add, syncing main/master first
+description: Open or create a session development branch on repo select, syncing main/master first
 triggers:
   - repo.selected
 execute:

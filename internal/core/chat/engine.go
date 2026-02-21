@@ -227,6 +227,9 @@ func (e *Engine) RunCommand(cmd command.Command) {
 		}
 		if active := e.Store.ActiveSession(); active != nil {
 			e.AddSystemMessage("Using session " + active.Name)
+			if repo := e.Store.ActiveRepo(); repo != nil {
+				e.runHooks(active, config.HookTriggerRepoSelected, repo.Path)
+			}
 		} else {
 			e.AddSystemMessage("Using session " + cmd.SessionID)
 		}
@@ -248,7 +251,7 @@ func (e *Engine) RunCommand(cmd command.Command) {
 			repoPath = repo.Path
 		}
 		if s := e.Store.ActiveSession(); s != nil {
-			e.runHooks(s, config.HookTriggerRepoAdded, repoPath)
+			e.runHooks(s, config.HookTriggerRepoSelected, repoPath)
 		}
 	case command.KindSessionRepos:
 		e.AddSystemMessage(e.Store.ListReposText())
