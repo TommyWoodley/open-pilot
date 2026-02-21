@@ -407,3 +407,75 @@ func TestSkillEndTagRendersClosingDivider(t *testing.T) {
 		t.Fatalf("expected assistant content to remain visible, got %q", joined)
 	}
 }
+
+func TestSkillTagExplanationLinesDoNotUseAgentMetaStyle(t *testing.T) {
+	msg := domain.Message{
+		Role: domain.RoleAssistant,
+		Content: strings.Join([]string{
+			"Implemented. Tag divider rendering is now generalized for all skill-style session tags.",
+			"",
+			"What changed",
+			"- internal/core/format/transcript.go:182",
+			"- Replaced brainstorming-only mapping with generic parsing:",
+			"- <SOMETHING_START> -> [[pilot-divider:<Titleized Something>]]",
+			"- <SOMETHING_END> -> [[pilot-divider:]]",
+		}, "\n"),
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{
+		AgentMeta: func(s string) string { return "<m>" + s + "</m>" },
+	})
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "<m>") {
+		t.Fatalf("expected explanatory skill-tag lines to avoid meta style, got %q", joined)
+	}
+}
+
+func TestCommandOutputMetaStopsAfterBlankSeparator(t *testing.T) {
+	msg := domain.Message{
+		Role: domain.RoleAssistant,
+		Content: strings.Join([]string{
+			"Command output:",
+			"ok package/a",
+			"",
+			"What changed",
+			"- Replaced brainstorming-only mapping with generic parsing:",
+		}, "\n"),
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{
+		AgentMeta: func(s string) string { return "<m>" + s + "</m>" },
+	})
+	joined := strings.Join(lines, "\n")
+
+	if !strings.Contains(joined, "<m>Command output:</m>") {
+		t.Fatalf("expected command output header to use meta style, got %q", joined)
+	}
+	if !strings.Contains(joined, "<m>ok package/a</m>") {
+		t.Fatalf("expected command output line to use meta style, got %q", joined)
+	}
+	if strings.Contains(joined, "<m>What changed</m>") {
+		t.Fatalf("expected narrative heading after blank separator to avoid meta style, got %q", joined)
+	}
+	if strings.Contains(joined, "<m>- Replaced brainstorming-only mapping with generic parsing:</m>") {
+		t.Fatalf("expected narrative list after blank separator to avoid meta style, got %q", joined)
+	}
+}
+
+func TestInlineCommandOutputPhraseInListDoesNotUseAgentMetaStyle(t *testing.T) {
+	msg := domain.Message{
+		Role: domain.RoleAssistant,
+		Content: strings.Join([]string{
+			"Fixed. The dimming bug was in agent-meta classification, not divider parsing.",
+			"",
+			"- Updated classifyAgentMetaLines to stop Command output: meta-mode when it hits a blank separator line, so following narrative/list lines are no longer greyed: internal/core/format/transcript.go:234.",
+			"- Added regression coverage for your example-style summary text: internal/core/format/format_test.go:411.",
+			"- Added a focused regression that reproduces and guards the command output then summary bleed-through: internal/core/format/format_test.go:433.",
+		}, "\n"),
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{
+		AgentMeta: func(s string) string { return "<m>" + s + "</m>" },
+	})
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "<m>") {
+		t.Fatalf("expected inline 'Command output:' phrase in list item to avoid meta style, got %q", joined)
+	}
+}

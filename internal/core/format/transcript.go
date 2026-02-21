@@ -232,6 +232,12 @@ func classifyAgentMetaLines(msg domain.Message, bodyLines []string) []bool {
 			inCommandOutput = false
 			allowErrorLine = false
 		case inCommandOutput:
+			if strings.TrimSpace(trimmed) == "" {
+				meta[i] = true
+				inCommandOutput = false
+				allowErrorLine = false
+				continue
+			}
 			meta[i] = true
 			allowErrorLine = false
 		default:
