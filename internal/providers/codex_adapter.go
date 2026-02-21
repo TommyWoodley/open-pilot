@@ -215,7 +215,7 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 		defer os.Remove(outputPath)
 	}
 
-	args := codexArgs(existingID, outputPath, prompt.Text)
+	args := codexArgs(existingID, outputPath, prompt.Text, prompt.RepoPath)
 	a.logf("run", "session=%s request=%s repo=%s args=%q", h.sessionID, prompt.ID, prompt.RepoPath, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, a.binary, args...)
 	cmd.Dir = prompt.RepoPath
@@ -383,11 +383,50 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 	return result, nil
 }
 
-func codexArgs(existingID, outputPath, prompt string) []string {
-	if existingID != "" {
-		return []string{"exec", "resume", "--json", "--skip-git-repo-check", "--", existingID, prompt}
+func codexArgs(existingID, outputPath, prompt, repoPath string) []string {
+	args := []string{"exec"}
+	args = append(args, "--json", "--skip-git-repo-check", "--sandbox", "workspace-write")
+	for _, dir := range codexWritableDirs(repoPath) {
+		args = append(args, "--add-dir", dir)
 	}
-	return []string{"exec", "--json", "--skip-git-repo-check", "--output-last-message", outputPath, "--", prompt}
+	if existingID != "" {
+		args = append(args, "resume", existingID, prompt)
+		return args
+	}
+	args = append(args, "--output-last-message", outputPath, "--", prompt)
+	return args
+}
+
+func codexWritableDirs(repoPath string) []string {
+	seen := make(map[string]struct{})
+	dirs := make([]string, 0, 8)
+	add := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		path = filepath.Clean(path)
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		dirs = append(dirs, path)
+	}
+
+	add(os.TempDir())
+
+	home, err := os.UserHomeDir()
+	if err == nil && strings.TrimSpace(home) != "" {
+		add(filepath.Join(home, "go"))
+		add(filepath.Join(home, ".cache"))
+		add(filepath.Join(home, "Library", "Caches"))
+	}
+
+	for _, raw := range strings.Split(os.Getenv("OPEN_PILOT_CODEX_ADD_DIRS"), string(os.PathListSeparator)) {
+		add(raw)
+	}
+
+	return dirs
 }
 
 func parseCodexJSONLine(line []byte) (codexJSONEvent, map[string]any, bool) {

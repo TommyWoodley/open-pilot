@@ -94,14 +94,29 @@ func TestCodexAdapterSubsequentPromptUsesResume(t *testing.T) {
 	if !strings.Contains(lines[0], "--skip-git-repo-check") {
 		t.Fatalf("expected first call to include skip-git-repo-check, got %q", lines[0])
 	}
-	if !strings.Contains(lines[1], "exec resume --json") {
+	if !strings.Contains(lines[0], "--sandbox workspace-write") {
+		t.Fatalf("expected first call to force workspace-write sandbox, got %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "--add-dir") {
+		t.Fatalf("expected first call to include add-dir writable roots, got %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "exec ") || !strings.Contains(lines[1], " resume ") {
 		t.Fatalf("expected second call to use resume, got %q", lines[1])
 	}
 	if !strings.Contains(lines[1], "--skip-git-repo-check") {
 		t.Fatalf("expected second call to include skip-git-repo-check, got %q", lines[1])
 	}
+	if !strings.Contains(lines[1], "--sandbox workspace-write") {
+		t.Fatalf("expected second call to force workspace-write sandbox, got %q", lines[1])
+	}
+	if !strings.Contains(lines[1], "--add-dir") {
+		t.Fatalf("expected second call to include add-dir writable roots, got %q", lines[1])
+	}
 	if strings.Contains(lines[1], "--output-last-message") {
 		t.Fatalf("expected resume call to omit output-last-message, got %q", lines[1])
+	}
+	if strings.Contains(lines[1], " -- thread-resume second prompt") {
+		t.Fatalf("expected resume call to pass session/prompt positionally without -- separator, got %q", lines[1])
 	}
 	if !strings.Contains(lines[1], "thread-resume second prompt") {
 		t.Fatalf("expected resume call to include thread id and prompt, got %q", lines[1])
