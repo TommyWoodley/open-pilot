@@ -355,3 +355,30 @@ func TestHookDividerTokenRendersStyledCenteredLine(t *testing.T) {
 		t.Fatalf("expected divider title to be visible, got %q", joined)
 	}
 }
+
+func TestBrainstormingTagsRenderAsDividerSection(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	m.Width = 100
+	m.Height = 24
+	s.Messages = append(s.Messages, domain.Message{
+		ID:      "msg-brainstorming-divider",
+		Role:    domain.RoleAssistant,
+		Content: "<BRAINSTORMING_START>\nQuestion\n<BRAINSTORMING_END>",
+	})
+
+	lines := m.displayTranscriptLines()
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "<BRAINSTORMING_START>") || strings.Contains(joined, "<BRAINSTORMING_END>") {
+		t.Fatalf("expected brainstorming tags to be transformed, got %q", joined)
+	}
+	if !strings.Contains(joined, "Brainstorming") {
+		t.Fatalf("expected brainstorming divider title to be visible, got %q", joined)
+	}
+	if !strings.Contains(joined, "[agent] Question") {
+		t.Fatalf("expected assistant brainstorming text to remain visible, got %q", joined)
+	}
+}

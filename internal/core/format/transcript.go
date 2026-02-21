@@ -138,25 +138,28 @@ func BuildTranscriptLines(messages []domain.Message, styles Styles) []string {
 			lines = append(lines, formatted.Prefix)
 		} else {
 			bodyLines := strings.Split(formatted.Body, "\n")
-			if msg.Role == domain.RoleSystem && isPilotDividerToken(bodyLines[0]) {
-				for _, line := range bodyLines {
-					lines = append(lines, line)
-				}
-				lines = append(lines, "")
-				continue
+			for i := range bodyLines {
+				bodyLines[i] = normalizeTranscriptSectionTag(bodyLines[i])
 			}
+
 			metaMask := classifyAgentMetaLines(msg, bodyLines)
-			if metaMask[0] && styles.AgentMeta != nil {
-				bodyLines[0] = styles.AgentMeta(bodyLines[0])
-			}
-			lines = append(lines, formatted.Prefix+" "+bodyLines[0])
 			continuationIndent := strings.Repeat(" ", visibleTextWidth(formatted.Prefix)+1)
-			for i := 1; i < len(bodyLines); i++ {
+			hasPrefixedLine := false
+			for i := 0; i < len(bodyLines); i++ {
 				line := bodyLines[i]
+				if isPilotDividerToken(line) {
+					lines = append(lines, line)
+					continue
+				}
 				if metaMask[i] && styles.AgentMeta != nil {
 					line = styles.AgentMeta(line)
 				}
-				lines = append(lines, continuationIndent+line)
+				if !hasPrefixedLine {
+					lines = append(lines, formatted.Prefix+" "+line)
+					hasPrefixedLine = true
+				} else {
+					lines = append(lines, continuationIndent+line)
+				}
 			}
 		}
 		lines = append(lines, "")
@@ -170,6 +173,17 @@ func BuildTranscriptLines(messages []domain.Message, styles Styles) []string {
 func isPilotDividerToken(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	return strings.HasPrefix(trimmed, "[[pilot-divider:") && strings.HasSuffix(trimmed, "]]")
+}
+
+func normalizeTranscriptSectionTag(line string) string {
+	switch strings.TrimSpace(line) {
+	case "<BRAINSTORMING_START>":
+		return "[[pilot-divider:Brainstorming]]"
+	case "<BRAINSTORMING_END>":
+		return "[[pilot-divider:]]"
+	default:
+		return line
+	}
 }
 
 func classifyAgentMetaLines(msg domain.Message, bodyLines []string) []bool {

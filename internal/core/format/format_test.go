@@ -317,3 +317,39 @@ func TestPilotSystemMessageDoesNotUseAgentMetaStyle(t *testing.T) {
 		t.Fatalf("expected pilot prefix in output, got %q", joined)
 	}
 }
+
+func TestBrainstormingStartTagRendersDividerAndKeepsAssistantContent(t *testing.T) {
+	msg := domain.Message{
+		Role:    domain.RoleAssistant,
+		Content: "<BRAINSTORMING_START>\nWhat should this include?",
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{})
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "<BRAINSTORMING_START>") {
+		t.Fatalf("expected start tag to be transformed, got %q", joined)
+	}
+	if !strings.Contains(joined, "[[pilot-divider:Brainstorming]]") {
+		t.Fatalf("expected brainstorming divider token, got %q", joined)
+	}
+	if !strings.Contains(joined, "[agent] What should this include?") {
+		t.Fatalf("expected assistant content to remain visible, got %q", joined)
+	}
+}
+
+func TestBrainstormingEndTagRendersClosingDivider(t *testing.T) {
+	msg := domain.Message{
+		Role:    domain.RoleAssistant,
+		Content: "Design approved\n<BRAINSTORMING_END>",
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{})
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "<BRAINSTORMING_END>") {
+		t.Fatalf("expected end tag to be transformed, got %q", joined)
+	}
+	if !strings.Contains(joined, "[[pilot-divider:]]") {
+		t.Fatalf("expected closing divider token, got %q", joined)
+	}
+	if !strings.Contains(joined, "[agent] Design approved") {
+		t.Fatalf("expected assistant content to remain visible, got %q", joined)
+	}
+}
