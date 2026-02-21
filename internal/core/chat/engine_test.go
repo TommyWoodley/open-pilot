@@ -716,7 +716,7 @@ func TestSessionAddRepoRunsRepoAddedHooks(t *testing.T) {
 	cfg := config.Default()
 	cfg.BuiltinHooks = config.HookCatalog{
 		Hooks: []config.HookDefinition{
-			{ID: "sync-main-or-master-on-repo-add", Triggers: []config.HookTrigger{config.HookTriggerRepoAdded}, Execute: []string{"echo ok"}, Timeout: time.Second},
+			{ID: "open-development-branch", Triggers: []config.HookTrigger{config.HookTriggerRepoAdded}, Execute: []string{"echo ok"}, Timeout: time.Second},
 		},
 	}
 	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)

@@ -1,8 +1,0 @@
-version: 1
-id: sync-main-or-master-on-repo-add
-description: Ensure main/master is synced when a repo is added; pass when no remote exists
-triggers:
-  - repo.added
-execute:
-  - repo="${OPEN_PILOT_REPO_PATH:-}"; [ -n "$repo" ] || exit 0; cd "$repo" || exit 1; git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0; remote="$(git remote | head -n 1)"; [ -n "$remote" ] || exit 0; if git show-ref --verify --quiet refs/heads/main || git ls-remote --exit-code --heads "$remote" main >/dev/null 2>&1; then branch=main; elif git show-ref --verify --quiet refs/heads/master || git ls-remote --exit-code --heads "$remote" master >/dev/null 2>&1; then branch=master; else exit 0; fi; git fetch "$remote" "$branch" >/dev/null 2>&1 || exit 1; git show-ref --verify --quiet "refs/remotes/$remote/$branch" || exit 0; current="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"; if [ "$current" = "$branch" ]; then git merge --ff-only "$remote/$branch" >/dev/null 2>&1 || exit 1; elif git show-ref --verify --quiet "refs/heads/$branch"; then git branch -f "$branch" "$remote/$branch" >/dev/null 2>&1 || exit 1; else git branch --track "$branch" "$remote/$branch" >/dev/null 2>&1 || exit 1; fi
-timeout: 30s

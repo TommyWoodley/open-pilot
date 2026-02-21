@@ -3,7 +3,9 @@ package hooks
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -224,4 +226,287 @@ func TestProviderCodexSelectedHookReplacesExistingSkills(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(destSkillDir, "stale.txt")); !os.IsNotExist(err) {
 		t.Fatalf("expected stale file to be removed, got err=%v", err)
 	}
+}
+
+func TestRepoAddedOpenDevelopmentBranchCreatesNormalizedBranchFromSyncedBase(t *testing.T) {
+	work := t.TempDir()
+	remote := filepath.Join(work, "remote.git")
+	seed := filepath.Join(work, "seed")
+	repo := filepath.Join(work, "repo")
+
+	runGit(t, work, "init", "--bare", remote)
+	runGit(t, work, "clone", remote, seed)
+	runGit(t, seed, "config", "user.email", "test@example.com")
+	runGit(t, seed, "config", "user.name", "Test User")
+	runGit(t, seed, "checkout", "-b", "main")
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+	runGit(t, seed, "add", "README.md")
+	runGit(t, seed, "commit", "-m", "seed v1")
+	runGit(t, seed, "push", "-u", "origin", "main")
+
+	runGit(t, work, "clone", remote, repo)
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+	runGit(t, repo, "checkout", "-b", "main", "origin/main")
+
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatalf("write seed update: %v", err)
+	}
+	runGit(t, seed, "add", "README.md")
+	runGit(t, seed, "commit", "-m", "seed v2")
+	runGit(t, seed, "push", "origin", "main")
+
+	script := scriptPath(t)
+	svc := NewService(config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{
+				ID:       "open-development-branch",
+				Triggers: []config.HookTrigger{config.HookTriggerRepoAdded},
+				Execute:  []string{"bash " + shellQuote(script)},
+				Timeout:  time.Second * 10,
+			},
+		},
+	}, "", "")
+
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "Feature 123/ABC", repo, nil)
+	if !result.Passed {
+		t.Fatalf("expected pass, got %#v", result)
+	}
+	if got := runGit(t, repo, "rev-parse", "--abbrev-ref", "HEAD"); got != "feature-123-abc" {
+		t.Fatalf("expected normalized session branch checked out, got %q", got)
+	}
+	branchTip := runGit(t, repo, "rev-parse", "feature-123-abc")
+	originTip := runGit(t, repo, "rev-parse", "origin/main")
+	if branchTip != originTip {
+		t.Fatalf("expected new branch from latest origin/main, branch=%s origin/main=%s", branchTip, originTip)
+	}
+}
+
+func TestRepoAddedOpenDevelopmentBranchUsesMasterWhenMainMissing(t *testing.T) {
+	work := t.TempDir()
+	remote := filepath.Join(work, "remote.git")
+	seed := filepath.Join(work, "seed")
+	repo := filepath.Join(work, "repo")
+
+	runGit(t, work, "init", "--bare", remote)
+	runGit(t, work, "clone", remote, seed)
+	runGit(t, seed, "config", "user.email", "test@example.com")
+	runGit(t, seed, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("master\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+	runGit(t, seed, "add", "README.md")
+	runGit(t, seed, "commit", "-m", "seed master")
+	runGit(t, seed, "push", "-u", "origin", "master")
+
+	runGit(t, work, "clone", remote, repo)
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+
+	script := scriptPath(t)
+	svc := NewService(config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{
+				ID:       "open-development-branch",
+				Triggers: []config.HookTrigger{config.HookTriggerRepoAdded},
+				Execute:  []string{"bash " + shellQuote(script)},
+				Timeout:  time.Second * 10,
+			},
+		},
+	}, "", "")
+
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "Master Session", repo, nil)
+	if !result.Passed {
+		t.Fatalf("expected pass, got %#v", result)
+	}
+	if got := runGit(t, repo, "rev-parse", "--abbrev-ref", "HEAD"); got != "master-session" {
+		t.Fatalf("expected master-session checked out, got %q", got)
+	}
+	branchTip := runGit(t, repo, "rev-parse", "master-session")
+	originTip := runGit(t, repo, "rev-parse", "origin/master")
+	if branchTip != originTip {
+		t.Fatalf("expected new branch from latest origin/master, branch=%s origin/master=%s", branchTip, originTip)
+	}
+}
+
+func TestRepoAddedOpenDevelopmentBranchExistingSessionBranchSyncsUpstreamOnly(t *testing.T) {
+	work := t.TempDir()
+	remote := filepath.Join(work, "remote.git")
+	seed := filepath.Join(work, "seed")
+	repo := filepath.Join(work, "repo")
+
+	runGit(t, work, "init", "--bare", remote)
+	runGit(t, work, "clone", remote, seed)
+	runGit(t, seed, "config", "user.email", "test@example.com")
+	runGit(t, seed, "config", "user.name", "Test User")
+	runGit(t, seed, "checkout", "-b", "main")
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+	runGit(t, seed, "add", "README.md")
+	runGit(t, seed, "commit", "-m", "base")
+	runGit(t, seed, "push", "-u", "origin", "main")
+
+	runGit(t, work, "clone", remote, repo)
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+	runGit(t, repo, "checkout", "-b", "main", "origin/main")
+	runGit(t, repo, "checkout", "-b", "feature-123")
+	if err := os.WriteFile(filepath.Join(repo, "feature.txt"), []byte("local feature\n"), 0o644); err != nil {
+		t.Fatalf("write local feature file: %v", err)
+	}
+	runGit(t, repo, "add", "feature.txt")
+	runGit(t, repo, "commit", "-m", "feature start")
+	runGit(t, repo, "push", "-u", "origin", "feature-123")
+
+	runGit(t, seed, "fetch", "origin")
+	runGit(t, seed, "checkout", "-b", "feature-123", "origin/feature-123")
+	if err := os.WriteFile(filepath.Join(seed, "feature.txt"), []byte("remote feature update\n"), 0o644); err != nil {
+		t.Fatalf("write seed feature update: %v", err)
+	}
+	runGit(t, seed, "add", "feature.txt")
+	runGit(t, seed, "commit", "-m", "feature update")
+	runGit(t, seed, "push", "origin", "feature-123")
+
+	runGit(t, seed, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("main moved\n"), 0o644); err != nil {
+		t.Fatalf("write seed main update: %v", err)
+	}
+	runGit(t, seed, "add", "README.md")
+	runGit(t, seed, "commit", "-m", "main update")
+	runGit(t, seed, "push", "origin", "main")
+
+	script := scriptPath(t)
+	svc := NewService(config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{
+				ID:       "open-development-branch",
+				Triggers: []config.HookTrigger{config.HookTriggerRepoAdded},
+				Execute:  []string{"bash " + shellQuote(script)},
+				Timeout:  time.Second * 10,
+			},
+		},
+	}, "", "")
+
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "Feature 123", repo, nil)
+	if !result.Passed {
+		t.Fatalf("expected pass, got %#v", result)
+	}
+	if got := runGit(t, repo, "rev-parse", "--abbrev-ref", "HEAD"); got != "feature-123" {
+		t.Fatalf("expected feature-123 checked out, got %q", got)
+	}
+	featureTip := runGit(t, repo, "rev-parse", "feature-123")
+	originFeatureTip := runGit(t, repo, "rev-parse", "origin/feature-123")
+	originMainTip := runGit(t, repo, "rev-parse", "origin/main")
+	if featureTip != originFeatureTip {
+		t.Fatalf("expected feature-123 to match upstream tip, local=%s upstream=%s", featureTip, originFeatureTip)
+	}
+	if featureTip == originMainTip {
+		t.Fatalf("expected feature branch not to be forced to main tip")
+	}
+}
+
+func TestRepoAddedOpenDevelopmentBranchNoRemoteIsNoop(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("local\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "local")
+
+	script := scriptPath(t)
+	svc := NewService(config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{
+				ID:         "open-development-branch",
+				SourcePath: "/tmp/open-development-branch.yaml",
+				Triggers:   []config.HookTrigger{config.HookTriggerRepoAdded},
+				Execute:    []string{"bash " + shellQuote(script)},
+				Timeout:    time.Second * 10,
+			},
+		},
+	}, "", "")
+
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "No Remote Session", repo, nil)
+	if !result.Passed {
+		t.Fatalf("expected pass/noop, got %#v", result)
+	}
+	if got := runGit(t, repo, "rev-parse", "--abbrev-ref", "HEAD"); got != "master" && got != "main" {
+		t.Fatalf("expected to remain on initial branch, got %q", got)
+	}
+}
+
+func TestRepoAddedOpenDevelopmentBranchNoMainOrMasterIsNoop(t *testing.T) {
+	work := t.TempDir()
+	remote := filepath.Join(work, "remote.git")
+	seed := filepath.Join(work, "seed")
+	repo := filepath.Join(work, "repo")
+
+	runGit(t, work, "init", "--bare", remote)
+	runGit(t, work, "clone", remote, seed)
+	runGit(t, seed, "config", "user.email", "test@example.com")
+	runGit(t, seed, "config", "user.name", "Test User")
+	runGit(t, seed, "checkout", "-b", "develop")
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("develop\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+	runGit(t, seed, "add", "README.md")
+	runGit(t, seed, "commit", "-m", "develop")
+	runGit(t, seed, "push", "-u", "origin", "develop")
+
+	runGit(t, work, "clone", remote, repo)
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+	runGit(t, repo, "checkout", "-b", "develop", "origin/develop")
+
+	script := scriptPath(t)
+	svc := NewService(config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{
+				ID:       "open-development-branch",
+				Triggers: []config.HookTrigger{config.HookTriggerRepoAdded},
+				Execute:  []string{"bash " + shellQuote(script)},
+				Timeout:  time.Second * 10,
+			},
+		},
+	}, "", "")
+
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "Develop Session", repo, nil)
+	if !result.Passed {
+		t.Fatalf("expected pass/noop, got %#v", result)
+	}
+	if got := runGit(t, repo, "rev-parse", "--abbrev-ref", "HEAD"); got != "develop" {
+		t.Fatalf("expected develop to remain checked out, got %q", got)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	fullArgs := append([]string{"-c", "commit.gpgsign=false"}, args...)
+	cmd := exec.Command("git", fullArgs...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed in %s: %v\n%s", strings.Join(args, " "), dir, err, string(out))
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func scriptPath(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("resolve caller path")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
+	return filepath.Join(root, "hooks", "scripts", "open-development-branch.sh")
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

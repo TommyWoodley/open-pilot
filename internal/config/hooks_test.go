@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -170,6 +171,24 @@ execute:
 	_, err := LoadBuiltinHooks(dir)
 	if err == nil || (!strings.Contains(err.Error(), "cannot be empty") && !strings.Contains(err.Error(), "expected list item")) {
 		t.Fatalf("expected empty execute error, got: %v", err)
+	}
+}
+
+func TestBuiltinHooksIncludeOpenDevelopmentBranch(t *testing.T) {
+	dir := Default().BuiltinHooksDir
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("builtin hooks dir missing: %v", err)
+	}
+	catalog, err := LoadBuiltinHooks(dir)
+	if err != nil {
+		t.Fatalf("load builtin hooks: %v", err)
+	}
+	ids := make([]string, 0, len(catalog.Hooks))
+	for _, h := range catalog.Hooks {
+		ids = append(ids, h.ID)
+	}
+	if !slices.Contains(ids, "open-development-branch") {
+		t.Fatalf("expected builtin hook id open-development-branch, got ids=%v", ids)
 	}
 }
 

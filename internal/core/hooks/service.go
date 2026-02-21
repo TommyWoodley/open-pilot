@@ -88,7 +88,7 @@ func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID,
 		for cmdIdx, command := range hook.Execute {
 			cmdCtx, cancel := context.WithTimeout(ctx, hook.Timeout)
 			cmd := exec.CommandContext(cmdCtx, "bash", "-lc", command)
-			cmd.Env = append(os.Environ(), runtimeEnv(sessionID, repoPath, r.builtinSkillsDir)...)
+			cmd.Env = append(os.Environ(), runtimeEnv(sessionID, repoPath, r.builtinSkillsDir, hook.SourcePath)...)
 			cmd.Env = append(cmd.Env, envToList(hook.Env)...)
 			if err := cmd.Run(); err != nil {
 				ctxErr := cmdCtx.Err()
@@ -140,8 +140,8 @@ func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID,
 	return result
 }
 
-func runtimeEnv(sessionID, repoPath, builtinSkillsDir string) []string {
-	out := make([]string, 0, 3)
+func runtimeEnv(sessionID, repoPath, builtinSkillsDir, hookSourcePath string) []string {
+	out := make([]string, 0, 4)
 	if sessionID != "" {
 		out = append(out, "OPEN_PILOT_SESSION_ID="+sessionID)
 	}
@@ -150,6 +150,9 @@ func runtimeEnv(sessionID, repoPath, builtinSkillsDir string) []string {
 	}
 	if builtinSkillsDir != "" {
 		out = append(out, "OPEN_PILOT_BUILTIN_SKILLS_DIR="+builtinSkillsDir)
+	}
+	if hookSourcePath != "" {
+		out = append(out, "OPEN_PILOT_HOOK_SOURCE_PATH="+hookSourcePath)
 	}
 	return out
 }

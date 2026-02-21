@@ -1,0 +1,8 @@
+version: 1
+id: open-development-branch
+description: Open or create a session development branch on repo add, syncing main/master first
+triggers:
+  - repo.added
+execute:
+  - hook_source="${OPEN_PILOT_HOOK_SOURCE_PATH:-}"; [ -n "$hook_source" ] || exit 1; hook_dir="$(cd "$(dirname "$hook_source")" && pwd)"; bash "$hook_dir/../scripts/open-development-branch.sh"
+timeout: 30s
