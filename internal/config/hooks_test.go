@@ -192,6 +192,40 @@ func TestBuiltinHooksIncludeOpenDevelopmentBranch(t *testing.T) {
 	}
 }
 
+func TestBuiltinHookInstallSkillsPullsSuperpowersFromGitHubMain(t *testing.T) {
+	dir := Default().BuiltinHooksDir
+	catalog, err := LoadBuiltinHooks(dir)
+	if err != nil {
+		t.Fatalf("load builtin hooks: %v", err)
+	}
+	var hook *HookDefinition
+	for i := range catalog.Hooks {
+		if catalog.Hooks[i].ID == "install-builtin-skills-on-codex-select" {
+			hook = &catalog.Hooks[i]
+			break
+		}
+	}
+	if hook == nil {
+		t.Fatalf("expected builtin hook install-builtin-skills-on-codex-select")
+	}
+	if len(hook.Execute) != 1 {
+		t.Fatalf("expected single execute command, got %d", len(hook.Execute))
+	}
+	command := hook.Execute[0]
+	if !strings.Contains(command, "repo=\"TommyWoodley/pilot-superpowers\"") {
+		t.Fatalf("expected github repo in command, got %q", command)
+	}
+	if !strings.Contains(command, "ref=\"main\"") {
+		t.Fatalf("expected main ref in command, got %q", command)
+	}
+	if !strings.Contains(command, "archive/refs/heads/${ref}.tar.gz") {
+		t.Fatalf("expected github archive download path in command, got %q", command)
+	}
+	if strings.Contains(command, "OPEN_PILOT_BUILTIN_SKILLS_DIR") {
+		t.Fatalf("expected no local builtin skills dir dependency, got %q", command)
+	}
+}
+
 func writeHookFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	path := filepath.Join(dir, name)

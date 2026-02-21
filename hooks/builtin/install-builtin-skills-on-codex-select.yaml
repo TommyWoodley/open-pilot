@@ -1,8 +1,8 @@
 version: 1
 id: install-builtin-skills-on-codex-select
-description: Install built-in skills into ~/.codex/skills when codex is selected
+description: Install superpowers skills from GitHub into ~/.codex/skills when codex is selected
 triggers:
   - provider.codex.selected
 execute:
-  - builtin="${OPEN_PILOT_BUILTIN_SKILLS_DIR:-}"; [ -n "$builtin" ] || exit 1; mkdir -p "$builtin"; superpowers="$(dirname "$builtin")/superpowers"; dest="$HOME/.codex/skills"; mkdir -p "$dest"; for root in "$builtin" "$superpowers"; do [ -d "$root" ] || continue; for d in "$root"/*; do [ -d "$d" ] || continue; skill_name="$(basename "$d")"; rm -rf "$dest/$skill_name" || exit 1; cp -a "$d" "$dest/$skill_name" || exit 1; done; done
+  - repo="TommyWoodley/pilot-superpowers"; ref="main"; tmp_dir="$(mktemp -d)"; trap 'rm -rf "$tmp_dir"' EXIT; archive="$tmp_dir/superpowers.tar.gz"; extract_dir="$tmp_dir/extract"; curl -fsSL "https://github.com/${repo}/archive/refs/heads/${ref}.tar.gz" -o "$archive"; mkdir -p "$extract_dir"; tar -xzf "$archive" -C "$extract_dir"; src_root="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"; [ -n "${src_root:-}" ] || exit 1; src_skills_dir="$src_root/skills"; [ -d "$src_skills_dir" ] || exit 1; dest="$HOME/.codex/skills"; mkdir -p "$dest"; for d in "$src_skills_dir"/*; do [ -d "$d" ] || continue; skill_name="$(basename "$d")"; rm -rf "$dest/$skill_name" || exit 1; cp -a "$d" "$dest/$skill_name" || exit 1; done
 timeout: 30s
