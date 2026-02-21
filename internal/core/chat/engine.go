@@ -38,6 +38,15 @@ type commandRunState struct {
 	status     string
 }
 
+type exploreSequenceState struct {
+	requestID     string
+	groupItemID   string
+	started       map[itemRef]struct{}
+	completed     map[itemRef]struct{}
+	completedRuns int
+	totalDuration time.Duration
+}
+
 const hooksRunningReason = "running"
 
 type HookEventType string
@@ -70,6 +79,8 @@ type Engine struct {
 	pending       map[string]pendingRef
 	itemRefs      map[string]pendingRef
 	commandRuns   map[itemRef]commandRunState
+	exploreSeq    map[string]*exploreSequenceState
+	nextExploreID int
 	hookProgress  map[string]hookProgressState
 	hookEvents    chan HookEvent
 	asyncHookRuns bool
@@ -88,6 +99,8 @@ func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config)
 		pending:       make(map[string]pendingRef),
 		itemRefs:      make(map[string]pendingRef),
 		commandRuns:   make(map[itemRef]commandRunState),
+		exploreSeq:    make(map[string]*exploreSequenceState),
+		nextExploreID: 1,
 		hookProgress:  make(map[string]hookProgressState),
 		unknownSeen:   make(map[string]struct{}),
 		nowFn:         time.Now,
@@ -631,8 +644,16 @@ func (e *Engine) handleCommandExecutionEvent(sessionID string, ev providers.Even
 		state.command = "(unknown command)"
 	}
 
+	explored := classifyCommand(state.command) == "explored"
 	displayCommand := shortenCommand(state.command, 120)
 	if status == "in_progress" {
+		if explored && ref.ItemID != "" {
+			seq := e.ensureExploreSequence(sessionID, ev.RequestID)
+			seq.started[ref] = struct{}{}
+			e.upsertItemMessage(sessionID, ev.RequestID, seq.groupItemID, renderExploreSequenceRunning(len(seq.started)))
+			return
+		}
+		e.resetExploreSequence(sessionID)
 		content := renderCommandRunning(displayCommand)
 		if ref.ItemID != "" {
 			e.upsertItemMessage(sessionID, ev.RequestID, ref.ItemID, content)
@@ -648,7 +669,22 @@ func (e *Engine) handleCommandExecutionEvent(sessionID string, ev providers.Even
 		failed = true
 	}
 
-	summary := renderCommandSummary(displayCommand, duration, classifyCommand(state.command) == "explored", failed, ev.CommandExitCode)
+	if explored && !failed && ref.ItemID != "" {
+		seq := e.ensureExploreSequence(sessionID, ev.RequestID)
+		if _, seen := seq.completed[ref]; !seen {
+			seq.completed[ref] = struct{}{}
+			seq.completedRuns++
+			if !state.startedAt.IsZero() && !now.Before(state.startedAt) {
+				seq.totalDuration += now.Sub(state.startedAt)
+			}
+		}
+		delete(e.commandRuns, ref)
+		e.upsertItemMessage(sessionID, ev.RequestID, seq.groupItemID, renderExploreSequenceSummary(seq.completedRuns, seq.totalDuration))
+		return
+	}
+
+	e.resetExploreSequence(sessionID)
+	summary := renderCommandSummary(displayCommand, duration, explored, failed, ev.CommandExitCode)
 	var content string
 	if failed {
 		teaser := extractErrorTeaser(state.lastOutput)
@@ -698,6 +734,13 @@ func renderCommandRunning(command string) string {
 	return fmt.Sprintf("Running `%s` ...", escapeInlineCode(command))
 }
 
+func renderExploreSequenceRunning(commands int) string {
+	if commands <= 1 {
+		return "Exploring ..."
+	}
+	return fmt.Sprintf("Exploring (%d commands) ...", commands)
+}
+
 func renderCommandCompleted(summary string) string {
 	return summary
 }
@@ -720,6 +763,20 @@ func renderCommandSummary(command, duration string, explored, failed bool, exitC
 		line += fmt.Sprintf(" (failed, exit=%s)", formatExitCode(exitCode))
 	}
 	return line
+}
+
+func renderExploreSequenceSummary(commands int, duration time.Duration) string {
+	if commands <= 1 {
+		return fmt.Sprintf("Explored for %s", formatDurationFromDelta(duration))
+	}
+	return fmt.Sprintf("Explored %d commands for %s", commands, formatDurationFromDelta(duration))
+}
+
+func formatDurationFromDelta(d time.Duration) string {
+	if d < 0 {
+		return "0s"
+	}
+	return formatDuration(time.Unix(0, 0), time.Unix(0, 0).Add(d))
 }
 
 func shortenCommand(command string, maxChars int) string {
@@ -765,6 +822,29 @@ func formatDuration(startedAt, finishedAt time.Time) string {
 		return fmt.Sprintf("%.1fs", sec)
 	}
 	return d.Round(time.Second).String()
+}
+
+func (e *Engine) ensureExploreSequence(sessionID, requestID string) *exploreSequenceState {
+	requestID = strings.TrimSpace(requestID)
+	if seq := e.exploreSeq[sessionID]; seq != nil {
+		if seq.requestID == requestID {
+			return seq
+		}
+	}
+
+	seq := &exploreSequenceState{
+		requestID:   requestID,
+		groupItemID: fmt.Sprintf("__explore_sequence_%d", e.nextExploreID),
+		started:     make(map[itemRef]struct{}),
+		completed:   make(map[itemRef]struct{}),
+	}
+	e.nextExploreID++
+	e.exploreSeq[sessionID] = seq
+	return seq
+}
+
+func (e *Engine) resetExploreSequence(sessionID string) {
+	delete(e.exploreSeq, sessionID)
 }
 
 func classifyCommand(command string) string {

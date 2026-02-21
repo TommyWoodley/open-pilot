@@ -450,6 +450,143 @@ func TestHandleProviderCommandExecutionUsesExploredSummaryForDiscoveryCommands(t
 	}
 }
 
+func TestHandleProviderCommandExecutionGroupsSequentialExploreCommands(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	start := time.Unix(1000, 0)
+	eng.nowFn = func() time.Time { return start }
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:          providers.EventCommandExecution,
+		SessionID:     s.ID,
+		RequestID:     "req-1",
+		ItemID:        "item-ls",
+		Command:       "ls -la",
+		CommandStatus: "in_progress",
+	})
+	eng.nowFn = func() time.Time { return start.Add(200 * time.Millisecond) }
+	zero := 0
+	eng.HandleProviderEvent(providers.Event{
+		Type:            providers.EventCommandExecution,
+		SessionID:       s.ID,
+		RequestID:       "req-1",
+		ItemID:          "item-ls",
+		Command:         "ls -la",
+		CommandStatus:   "completed",
+		CommandExitCode: &zero,
+	})
+	eng.nowFn = func() time.Time { return start.Add(200 * time.Millisecond) }
+	eng.HandleProviderEvent(providers.Event{
+		Type:          providers.EventCommandExecution,
+		SessionID:     s.ID,
+		RequestID:     "req-1",
+		ItemID:        "item-rg",
+		Command:       "rg --files",
+		CommandStatus: "in_progress",
+	})
+	eng.nowFn = func() time.Time { return start.Add(500 * time.Millisecond) }
+	eng.HandleProviderEvent(providers.Event{
+		Type:            providers.EventCommandExecution,
+		SessionID:       s.ID,
+		RequestID:       "req-1",
+		ItemID:          "item-rg",
+		Command:         "rg --files",
+		CommandStatus:   "completed",
+		CommandExitCode: &zero,
+	})
+
+	msgs := store.ActiveSession().Messages
+	if len(msgs) != 1 {
+		t.Fatalf("expected one grouped message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "Explored 2 commands for 500ms") {
+		t.Fatalf("expected grouped explore summary, got %q", msgs[0].Content)
+	}
+}
+
+func TestHandleProviderCommandExecutionStartsNewExploreGroupAfterNonExploreCommand(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	start := time.Unix(1000, 0)
+	eng.nowFn = func() time.Time { return start }
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:          providers.EventCommandExecution,
+		SessionID:     s.ID,
+		RequestID:     "req-1",
+		ItemID:        "item-find",
+		Command:       "find . -maxdepth 1",
+		CommandStatus: "in_progress",
+	})
+	eng.nowFn = func() time.Time { return start.Add(100 * time.Millisecond) }
+	zero := 0
+	eng.HandleProviderEvent(providers.Event{
+		Type:            providers.EventCommandExecution,
+		SessionID:       s.ID,
+		RequestID:       "req-1",
+		ItemID:          "item-find",
+		Command:         "find . -maxdepth 1",
+		CommandStatus:   "completed",
+		CommandExitCode: &zero,
+	})
+
+	eng.nowFn = func() time.Time { return start.Add(120 * time.Millisecond) }
+	eng.HandleProviderEvent(providers.Event{
+		Type:          providers.EventCommandExecution,
+		SessionID:     s.ID,
+		RequestID:     "req-1",
+		ItemID:        "item-test",
+		Command:       "go test ./...",
+		CommandStatus: "in_progress",
+	})
+	eng.nowFn = func() time.Time { return start.Add(240 * time.Millisecond) }
+	eng.HandleProviderEvent(providers.Event{
+		Type:            providers.EventCommandExecution,
+		SessionID:       s.ID,
+		RequestID:       "req-1",
+		ItemID:          "item-test",
+		Command:         "go test ./...",
+		CommandStatus:   "completed",
+		CommandExitCode: &zero,
+	})
+
+	eng.nowFn = func() time.Time { return start.Add(240 * time.Millisecond) }
+	eng.HandleProviderEvent(providers.Event{
+		Type:          providers.EventCommandExecution,
+		SessionID:     s.ID,
+		RequestID:     "req-1",
+		ItemID:        "item-rg",
+		Command:       "rg --files",
+		CommandStatus: "in_progress",
+	})
+	eng.nowFn = func() time.Time { return start.Add(440 * time.Millisecond) }
+	eng.HandleProviderEvent(providers.Event{
+		Type:            providers.EventCommandExecution,
+		SessionID:       s.ID,
+		RequestID:       "req-1",
+		ItemID:          "item-rg",
+		Command:         "rg --files",
+		CommandStatus:   "completed",
+		CommandExitCode: &zero,
+	})
+
+	msgs := store.ActiveSession().Messages
+	if len(msgs) != 3 {
+		t.Fatalf("expected separate summaries around non-explore command, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "Explored for 100ms") {
+		t.Fatalf("expected first explore summary, got %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[1].Content, "Ran `go test ./...` for 120ms") {
+		t.Fatalf("expected non-explore summary, got %q", msgs[1].Content)
+	}
+	if !strings.Contains(msgs[2].Content, "Explored for 200ms") {
+		t.Fatalf("expected second explore summary to be separate group, got %q", msgs[2].Content)
+	}
+}
+
 func TestHandleProviderTurnUsageIsNotRendered(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
