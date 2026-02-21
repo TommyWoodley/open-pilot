@@ -382,3 +382,30 @@ func TestBrainstormingTagsRenderAsDividerSection(t *testing.T) {
 		t.Fatalf("expected assistant brainstorming text to remain visible, got %q", joined)
 	}
 }
+
+func TestSkillTagsRenderAsDividerSection(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	m.Width = 100
+	m.Height = 24
+	s.Messages = append(s.Messages, domain.Message{
+		ID:      "msg-tdd-divider",
+		Role:    domain.RoleAssistant,
+		Content: "<TEST_DRIVEN_DEVELOPMENT_START>\nQuestion\n<TEST_DRIVEN_DEVELOPMENT_END>",
+	})
+
+	lines := m.displayTranscriptLines()
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "<TEST_DRIVEN_DEVELOPMENT_START>") || strings.Contains(joined, "<TEST_DRIVEN_DEVELOPMENT_END>") {
+		t.Fatalf("expected skill tags to be transformed, got %q", joined)
+	}
+	if !strings.Contains(joined, "Test Driven Development") {
+		t.Fatalf("expected skill divider title to be visible, got %q", joined)
+	}
+	if !strings.Contains(joined, "[agent] Question") {
+		t.Fatalf("expected assistant skill text to remain visible, got %q", joined)
+	}
+}

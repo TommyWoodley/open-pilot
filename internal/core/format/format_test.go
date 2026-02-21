@@ -371,3 +371,39 @@ func TestBrainstormingEndTagRendersClosingDivider(t *testing.T) {
 		t.Fatalf("expected assistant content to remain visible, got %q", joined)
 	}
 }
+
+func TestSkillStartTagRendersDividerTitle(t *testing.T) {
+	msg := domain.Message{
+		Role:    domain.RoleAssistant,
+		Content: "<TEST_DRIVEN_DEVELOPMENT_START>\nWrite the first failing test",
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{})
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "<TEST_DRIVEN_DEVELOPMENT_START>") {
+		t.Fatalf("expected skill start tag to be transformed, got %q", joined)
+	}
+	if !strings.Contains(joined, "[[pilot-divider:Test Driven Development]]") {
+		t.Fatalf("expected skill divider title, got %q", joined)
+	}
+	if !strings.Contains(joined, "[agent] Write the first failing test") {
+		t.Fatalf("expected assistant content to remain visible, got %q", joined)
+	}
+}
+
+func TestSkillEndTagRendersClosingDivider(t *testing.T) {
+	msg := domain.Message{
+		Role:    domain.RoleAssistant,
+		Content: "All tests green\n<TEST_DRIVEN_DEVELOPMENT_END>",
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{})
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "<TEST_DRIVEN_DEVELOPMENT_END>") {
+		t.Fatalf("expected skill end tag to be transformed, got %q", joined)
+	}
+	if !strings.Contains(joined, "[[pilot-divider:]]") {
+		t.Fatalf("expected closing divider token, got %q", joined)
+	}
+	if !strings.Contains(joined, "[agent] All tests green") {
+		t.Fatalf("expected assistant content to remain visible, got %q", joined)
+	}
+}

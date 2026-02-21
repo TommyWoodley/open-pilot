@@ -52,6 +52,10 @@ func FormatMessageForTranscript(msg domain.Message, styles Styles) RenderedMessa
 		switch block.Kind {
 		case BlockParagraph:
 			for _, l := range strings.Split(block.Text, "\n") {
+				if isTranscriptSectionTag(strings.TrimSpace(l)) {
+					lines = append(lines, l)
+					continue
+				}
 				lines = append(lines, RenderInline(l, InlineStyles{
 					Code:   styles.InlineCode,
 					Link:   styles.Link,
@@ -176,14 +180,30 @@ func isPilotDividerToken(line string) bool {
 }
 
 func normalizeTranscriptSectionTag(line string) string {
-	switch strings.TrimSpace(line) {
-	case "<BRAINSTORMING_START>":
-		return "[[pilot-divider:Brainstorming]]"
-	case "<BRAINSTORMING_END>":
-		return "[[pilot-divider:]]"
-	default:
-		return line
+	trimmed := strings.TrimSpace(line)
+	if matches := sectionStartTagRegex.FindStringSubmatch(trimmed); len(matches) == 2 {
+		return "[[pilot-divider:" + formatTranscriptSectionTitle(matches[1]) + "]]"
 	}
+	if matches := sectionEndTagRegex.FindStringSubmatch(trimmed); len(matches) == 2 {
+		return "[[pilot-divider:]]"
+	}
+	return line
+}
+
+func formatTranscriptSectionTitle(raw string) string {
+	parts := strings.Split(raw, "_")
+	for i, part := range parts {
+		part = strings.ToLower(part)
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func isTranscriptSectionTag(line string) bool {
+	return sectionStartTagRegex.MatchString(line) || sectionEndTagRegex.MatchString(line)
 }
 
 func classifyAgentMetaLines(msg domain.Message, bodyLines []string) []bool {
@@ -226,6 +246,8 @@ var sgrANSIRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 var runningCommandSummaryRegex = regexp.MustCompile(`^Running .+ \.\.\.$`)
 var completedCommandSummaryRegex = regexp.MustCompile(`^Ran .+ for .+`)
 var exploredCommandSummaryRegex = regexp.MustCompile(`^Explored(?: \d+ commands)? for .+`)
+var sectionStartTagRegex = regexp.MustCompile(`^<([A-Z0-9_]+)_START>$`)
+var sectionEndTagRegex = regexp.MustCompile(`^<([A-Z0-9_]+)_END>$`)
 
 func visibleTextWidth(s string) int {
 	plain := sgrANSIRegex.ReplaceAllString(s, "")
