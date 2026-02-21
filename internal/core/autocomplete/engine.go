@@ -71,13 +71,27 @@ func (e *Engine) Apply(input string, opt Options) string {
 	e.completionIndex = (e.completionIndex + 1) % len(e.completionOptions)
 
 	tokens[idx] = chosen
-	return strings.Join(tokens, " ") + " "
+	completed := strings.Join(tokens, " ")
+	if isPathCompletionContext(context) {
+		return completed
+	}
+	return completed + " "
 }
 
 func (e *Engine) Suggestions(input string, opt Options) []string {
 	raw := strings.TrimLeft(input, " \t")
 	if !strings.HasPrefix(raw, "/") {
 		return nil
+	}
+
+	if strings.HasPrefix(raw, "/session add-repo ") {
+		pathPrefix := strings.TrimPrefix(raw, "/session add-repo ")
+		paths := limitStrings(pathCompletionOptions(pathPrefix), 15)
+		out := make([]string, 0, len(paths))
+		for _, p := range paths {
+			out = append(out, "/session add-repo "+p)
+		}
+		return out
 	}
 
 	candidates := append([]string{}, command.BaseSuggestions()...)
@@ -89,17 +103,11 @@ func (e *Engine) Suggestions(input string, opt Options) []string {
 		candidates = append(candidates, "/session repo use "+repoID)
 	}
 
-	if strings.HasPrefix(raw, "/session add-repo ") {
-		pathPrefix := strings.TrimPrefix(raw, "/session add-repo ")
-		for _, p := range limitStrings(pathCompletionOptions(pathPrefix), 15) {
-			candidates = append(candidates, "/session add-repo "+p)
-		}
-	}
-
 	filtered := make([]string, 0, len(candidates))
 	for _, c := range candidates {
 		if raw == "/" || strings.HasPrefix(c, raw) {
 			filtered = append(filtered, c)
+			continue
 		}
 	}
 	return command.SortAndDedupe(filtered)
@@ -187,7 +195,7 @@ func pathCompletionOptions(current string) []string {
 
 	if dirPart == "." || dirPart == "" {
 		searchDir = wd
-		if dirPart == "." {
+		if strings.HasPrefix(current, "."+string(os.PathSeparator)) {
 			outputBase = "./"
 		} else {
 			outputBase = ""
@@ -209,10 +217,16 @@ func readDirMatches(searchDir, outputBase, prefix string, absMode bool) []string
 		return nil
 	}
 
+	prefixLower := strings.ToLower(prefix)
+	showHidden := strings.HasPrefix(prefix, ".")
+
 	matches := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasPrefix(name, prefix) {
+		if strings.HasPrefix(name, ".") && !showHidden {
+			continue
+		}
+		if !strings.HasPrefix(strings.ToLower(name), prefixLower) {
 			continue
 		}
 		candidate := outputBase + name
@@ -224,7 +238,17 @@ func readDirMatches(searchDir, outputBase, prefix string, absMode bool) []string
 		}
 		matches = append(matches, candidate)
 	}
-	sort.Strings(matches)
+	sort.Slice(matches, func(i, j int) bool {
+		if len(matches[i]) != len(matches[j]) {
+			return len(matches[i]) < len(matches[j])
+		}
+		left := strings.ToLower(matches[i])
+		right := strings.ToLower(matches[j])
+		if left != right {
+			return left < right
+		}
+		return matches[i] < matches[j]
+	})
 	return matches
 }
 
@@ -257,6 +281,10 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func isPathCompletionContext(context []string) bool {
+	return len(context) == 2 && context[0] == "/session" && context[1] == "add-repo"
 }
 
 func limitStrings(values []string, limit int) []string {

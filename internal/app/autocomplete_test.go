@@ -94,7 +94,7 @@ func TestAutocompleteAddRepoPath(t *testing.T) {
 		t.Fatalf("expected Model type from Update")
 	}
 
-	expected := "/session add-repo " + targetDir + string(os.PathSeparator) + " "
+	expected := "/session add-repo " + targetDir + string(os.PathSeparator)
 	if nextModel.Input != expected {
 		t.Fatalf("expected path autocomplete %q, got %q", expected, nextModel.Input)
 	}
