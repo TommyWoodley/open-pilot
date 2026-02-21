@@ -13,7 +13,7 @@ import (
 )
 
 type Service interface {
-	Run(ctx context.Context, trigger config.HookTrigger, sessionID, repoPath string, onUpdate func(ProgressUpdate)) RunResult
+	Run(ctx context.Context, trigger config.HookTrigger, sessionID, sessionName, repoPath string, onUpdate func(ProgressUpdate)) RunResult
 }
 
 type ProgressUpdate struct {
@@ -55,7 +55,7 @@ func NewService(catalog config.HookCatalog, loadError, builtinSkillsDir string) 
 	}
 }
 
-func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID, repoPath string, onUpdate func(ProgressUpdate)) RunResult {
+func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID, sessionName, repoPath string, onUpdate func(ProgressUpdate)) RunResult {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -88,7 +88,7 @@ func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID,
 		for cmdIdx, command := range hook.Execute {
 			cmdCtx, cancel := context.WithTimeout(ctx, hook.Timeout)
 			cmd := exec.CommandContext(cmdCtx, "bash", "-lc", command)
-			cmd.Env = append(os.Environ(), runtimeEnv(sessionID, repoPath, r.builtinSkillsDir, hook.SourcePath)...)
+			cmd.Env = append(os.Environ(), runtimeEnv(sessionID, sessionName, repoPath, r.builtinSkillsDir, hook.SourcePath)...)
 			cmd.Env = append(cmd.Env, envToList(hook.Env)...)
 			if err := cmd.Run(); err != nil {
 				ctxErr := cmdCtx.Err()
@@ -140,10 +140,13 @@ func (r *runner) Run(ctx context.Context, trigger config.HookTrigger, sessionID,
 	return result
 }
 
-func runtimeEnv(sessionID, repoPath, builtinSkillsDir, hookSourcePath string) []string {
-	out := make([]string, 0, 4)
+func runtimeEnv(sessionID, sessionName, repoPath, builtinSkillsDir, hookSourcePath string) []string {
+	out := make([]string, 0, 5)
 	if sessionID != "" {
 		out = append(out, "OPEN_PILOT_SESSION_ID="+sessionID)
+	}
+	if sessionName != "" {
+		out = append(out, "OPEN_PILOT_SESSION_NAME="+sessionName)
 	}
 	if repoPath != "" {
 		out = append(out, "OPEN_PILOT_REPO_PATH="+repoPath)

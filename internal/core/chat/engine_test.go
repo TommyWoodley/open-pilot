@@ -25,7 +25,7 @@ type fakeHooks struct {
 	lastRepoPath string
 }
 
-func (f *fakeHooks) Run(_ context.Context, trigger config.HookTrigger, _ string, repoPath string, _ func(corehooks.ProgressUpdate)) corehooks.RunResult {
+func (f *fakeHooks) Run(_ context.Context, trigger config.HookTrigger, _ string, _ string, repoPath string, _ func(corehooks.ProgressUpdate)) corehooks.RunResult {
 	f.calls++
 	f.lastTrigger = trigger
 	f.lastRepoPath = repoPath

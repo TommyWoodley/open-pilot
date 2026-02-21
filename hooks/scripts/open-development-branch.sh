@@ -52,7 +52,7 @@ if [ -n "$remote" ]; then
   fi
 fi
 
-session_name="${OPEN_PILOT_SESSION_ID:-session}"
+session_name="${OPEN_PILOT_SESSION_NAME:-${OPEN_PILOT_SESSION_ID:-session}}"
 target="$(normalize_branch_name "$session_name")"
 
 if git show-ref --verify --quiet "refs/heads/$target"; then

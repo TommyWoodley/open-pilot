@@ -30,7 +30,7 @@ func TestRunExecutesCommandsInOrder(t *testing.T) {
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
+	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", "", nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got failure: %#v", result)
 	}
@@ -56,7 +56,7 @@ func TestRunStopsOnNonZeroExit(t *testing.T) {
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
+	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", "", nil)
 	if result.Passed {
 		t.Fatalf("expected failure")
 	}
@@ -80,7 +80,7 @@ func TestRunReturnsTimeoutReason(t *testing.T) {
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
+	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", "", nil)
 	if result.Passed {
 		t.Fatalf("expected timeout failure")
 	}
@@ -106,7 +106,7 @@ func TestRunSetsEnvOnCommand(t *testing.T) {
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
+	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", "", nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -119,7 +119,7 @@ func TestRunSetsEnvOnCommand(t *testing.T) {
 	}
 }
 
-func TestRunSetsRepoPathEnvOnCommand(t *testing.T) {
+func TestRunSetsSessionAndRepoEnvOnCommand(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "repo.txt")
 	svc := NewService(config.HookCatalog{
@@ -127,13 +127,13 @@ func TestRunSetsRepoPathEnvOnCommand(t *testing.T) {
 			{
 				ID:       "repo-env",
 				Triggers: []config.HookTrigger{config.HookTriggerRepoAdded},
-				Execute:  []string{"echo $OPEN_PILOT_REPO_PATH > " + target},
+				Execute:  []string{"echo $OPEN_PILOT_SESSION_ID,$OPEN_PILOT_SESSION_NAME,$OPEN_PILOT_REPO_PATH > " + target},
 				Timeout:  time.Second,
 			},
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "/tmp/my-repo", nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "Feature 123", "/tmp/my-repo", nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -141,14 +141,14 @@ func TestRunSetsRepoPathEnvOnCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read repo output: %v", err)
 	}
-	if strings.TrimSpace(string(data)) != "/tmp/my-repo" {
-		t.Fatalf("expected repo path env, got %q", string(data))
+	if strings.TrimSpace(string(data)) != "s-1,Feature 123,/tmp/my-repo" {
+		t.Fatalf("expected session+repo env values, got %q", string(data))
 	}
 }
 
 func TestRunFailsClosedOnLoadError(t *testing.T) {
 	svc := NewService(config.HookCatalog{}, "broken yaml", "")
-	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", nil)
+	result := svc.Run(context.Background(), config.HookTriggerSessionStarted, "s-1", "", "", nil)
 	if result.Passed {
 		t.Fatalf("expected fail-closed")
 	}
@@ -171,7 +171,7 @@ func TestRunSetsBuiltinSkillsDirEnvOnCommand(t *testing.T) {
 		},
 	}, "", "/tmp/open-pilot/skills/builtin")
 
-	result := svc.Run(context.Background(), config.HookTriggerProviderCodexSelected, "s-1", "", nil)
+	result := svc.Run(context.Background(), config.HookTriggerProviderCodexSelected, "s-1", "", "", nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -216,7 +216,7 @@ func TestProviderCodexSelectedHookReplacesExistingSkills(t *testing.T) {
 	}, "", sourceRoot)
 
 	t.Setenv("HOME", filepath.Join(work, "home"))
-	result := svc.Run(context.Background(), config.HookTriggerProviderCodexSelected, "s-1", "", nil)
+	result := svc.Run(context.Background(), config.HookTriggerProviderCodexSelected, "s-1", "", "", nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -270,7 +270,7 @@ func TestRepoAddedOpenDevelopmentBranchCreatesNormalizedBranchFromSyncedBase(t *
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "Feature 123/ABC", repo, nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "Feature 123/ABC", repo, nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -317,7 +317,7 @@ func TestRepoAddedOpenDevelopmentBranchUsesMasterWhenMainMissing(t *testing.T) {
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "Master Session", repo, nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "Master Session", repo, nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -390,7 +390,7 @@ func TestRepoAddedOpenDevelopmentBranchExistingSessionBranchSyncsUpstreamOnly(t 
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "Feature 123", repo, nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "Feature 123", repo, nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -433,7 +433,7 @@ func TestRepoAddedOpenDevelopmentBranchNoRemoteCreatesSessionBranchFromHEAD(t *t
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "No Remote Session", repo, nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "No Remote Session", repo, nil)
 	if !result.Passed {
 		t.Fatalf("expected pass, got %#v", result)
 	}
@@ -442,6 +442,39 @@ func TestRepoAddedOpenDevelopmentBranchNoRemoteCreatesSessionBranchFromHEAD(t *t
 	}
 	if got := runGit(t, repo, "rev-parse", "no-remote-session"); got != headTip {
 		t.Fatalf("expected no-remote-session to branch from prior HEAD, got %s want %s", got, headTip)
+	}
+}
+
+func TestRepoAddedOpenDevelopmentBranchUsesSessionNameNotSessionID(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("local\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "local")
+
+	script := scriptPath(t)
+	svc := NewService(config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{
+				ID:         "open-development-branch",
+				SourcePath: "/tmp/open-development-branch.yaml",
+				Triggers:   []config.HookTrigger{config.HookTriggerRepoAdded},
+				Execute:    []string{"bash " + shellQuote(script)},
+				Timeout:    time.Second * 10,
+			},
+		},
+	}, "", "")
+
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "session-123", "Feature Session", repo, nil)
+	if !result.Passed {
+		t.Fatalf("expected pass, got %#v", result)
+	}
+	if got := runGit(t, repo, "rev-parse", "--abbrev-ref", "HEAD"); got != "feature-session" {
+		t.Fatalf("expected branch based on session name, got %q", got)
 	}
 }
 
@@ -480,7 +513,7 @@ func TestRepoAddedOpenDevelopmentBranchNoMainOrMasterIsNoop(t *testing.T) {
 		},
 	}, "", "")
 
-	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "Develop Session", repo, nil)
+	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "s-1", "Develop Session", repo, nil)
 	if !result.Passed {
 		t.Fatalf("expected pass/noop, got %#v", result)
 	}

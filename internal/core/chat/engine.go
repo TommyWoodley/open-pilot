@@ -353,7 +353,7 @@ func (e *Engine) runHooksSync(s *domain.Session, trigger config.HookTrigger, rep
 			e.renderHookProgress(s.ID, state, update.Completed, "")
 		}
 	}
-	result := e.Hooks.Run(context.Background(), trigger, s.ID, repoPath, onUpdate)
+	result := e.Hooks.Run(context.Background(), trigger, s.ID, s.Name, repoPath, onUpdate)
 	s.LastHookRunAt = e.nowFn()
 	if !result.Passed && result.FailedHookID != "" && result.FailedCommandIndex > 0 {
 		state.statuses[result.FailedHookID] = fmt.Sprintf("failed (command %d, %s)", result.FailedCommandIndex, result.Reason)
@@ -410,7 +410,7 @@ func (e *Engine) runHooksAsync(s *domain.Session, trigger config.HookTrigger, re
 	e.StatusText = "Running hooks..."
 	e.renderHookProgress(s.ID, state, 0, "")
 
-	go func(sessionID string) {
+	go func(sessionID, sessionName string) {
 		onUpdate := func(update corehooks.ProgressUpdate) {
 			e.emitHookEvent(HookEvent{
 				Type:      HookEventProgress,
@@ -418,13 +418,13 @@ func (e *Engine) runHooksAsync(s *domain.Session, trigger config.HookTrigger, re
 				Update:    update,
 			})
 		}
-		result := e.Hooks.Run(context.Background(), trigger, sessionID, repoPath, onUpdate)
+		result := e.Hooks.Run(context.Background(), trigger, sessionID, sessionName, repoPath, onUpdate)
 		e.emitHookEvent(HookEvent{
 			Type:      HookEventDone,
 			SessionID: sessionID,
 			Result:    result,
 		})
-	}(s.ID)
+	}(s.ID, s.Name)
 }
 
 func (e *Engine) renderHookProgress(sessionID string, state hookProgressState, completed int, runningID string) {
