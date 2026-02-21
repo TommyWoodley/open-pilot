@@ -22,9 +22,15 @@ cd "$repo" || exit 1
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
 remote="$(git remote | head -n 1)"
-[ -n "$remote" ] || exit 0
-
-if git show-ref --verify --quiet refs/heads/main || git ls-remote --exit-code --heads "$remote" main >/dev/null 2>&1; then
+if [ -z "$remote" ]; then
+  if git show-ref --verify --quiet refs/heads/main; then
+    base="main"
+  elif git show-ref --verify --quiet refs/heads/master; then
+    base="master"
+  else
+    base="HEAD"
+  fi
+elif git show-ref --verify --quiet refs/heads/main || git ls-remote --exit-code --heads "$remote" main >/dev/null 2>&1; then
   base="main"
 elif git show-ref --verify --quiet refs/heads/master || git ls-remote --exit-code --heads "$remote" master >/dev/null 2>&1; then
   base="master"
@@ -32,16 +38,18 @@ else
   exit 0
 fi
 
-git fetch "$remote" "$base" >/dev/null 2>&1 || exit 1
-git show-ref --verify --quiet "refs/remotes/$remote/$base" || exit 0
+if [ -n "$remote" ]; then
+  git fetch "$remote" "$base" >/dev/null 2>&1 || exit 1
+  git show-ref --verify --quiet "refs/remotes/$remote/$base" || exit 0
 
-current="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
-if [ "$current" = "$base" ]; then
-  git merge --ff-only "$remote/$base" >/dev/null 2>&1 || exit 1
-elif git show-ref --verify --quiet "refs/heads/$base"; then
-  git branch -f "$base" "$remote/$base" >/dev/null 2>&1 || exit 1
-else
-  git branch --track "$base" "$remote/$base" >/dev/null 2>&1 || exit 1
+  current="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  if [ "$current" = "$base" ]; then
+    git merge --ff-only "$remote/$base" >/dev/null 2>&1 || exit 1
+  elif git show-ref --verify --quiet "refs/heads/$base"; then
+    git branch -f "$base" "$remote/$base" >/dev/null 2>&1 || exit 1
+  else
+    git branch --track "$base" "$remote/$base" >/dev/null 2>&1 || exit 1
+  fi
 fi
 
 session_name="${OPEN_PILOT_SESSION_ID:-session}"
@@ -61,7 +69,7 @@ if git show-ref --verify --quiet "refs/heads/$target"; then
   exit 0
 fi
 
-if git ls-remote --exit-code --heads "$remote" "$target" >/dev/null 2>&1; then
+if [ -n "$remote" ] && git ls-remote --exit-code --heads "$remote" "$target" >/dev/null 2>&1; then
   git checkout -b "$target" --track "$remote/$target" >/dev/null 2>&1 || exit 1
 else
   git checkout -b "$target" "$base" >/dev/null 2>&1 || exit 1

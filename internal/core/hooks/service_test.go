@@ -408,7 +408,7 @@ func TestRepoAddedOpenDevelopmentBranchExistingSessionBranchSyncsUpstreamOnly(t 
 	}
 }
 
-func TestRepoAddedOpenDevelopmentBranchNoRemoteIsNoop(t *testing.T) {
+func TestRepoAddedOpenDevelopmentBranchNoRemoteCreatesSessionBranchFromHEAD(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init")
 	runGit(t, repo, "config", "user.email", "test@example.com")
@@ -418,6 +418,7 @@ func TestRepoAddedOpenDevelopmentBranchNoRemoteIsNoop(t *testing.T) {
 	}
 	runGit(t, repo, "add", "README.md")
 	runGit(t, repo, "commit", "-m", "local")
+	headTip := runGit(t, repo, "rev-parse", "HEAD")
 
 	script := scriptPath(t)
 	svc := NewService(config.HookCatalog{
@@ -434,10 +435,13 @@ func TestRepoAddedOpenDevelopmentBranchNoRemoteIsNoop(t *testing.T) {
 
 	result := svc.Run(context.Background(), config.HookTriggerRepoAdded, "No Remote Session", repo, nil)
 	if !result.Passed {
-		t.Fatalf("expected pass/noop, got %#v", result)
+		t.Fatalf("expected pass, got %#v", result)
 	}
-	if got := runGit(t, repo, "rev-parse", "--abbrev-ref", "HEAD"); got != "master" && got != "main" {
-		t.Fatalf("expected to remain on initial branch, got %q", got)
+	if got := runGit(t, repo, "rev-parse", "--abbrev-ref", "HEAD"); got != "no-remote-session" {
+		t.Fatalf("expected no-remote-session checked out, got %q", got)
+	}
+	if got := runGit(t, repo, "rev-parse", "no-remote-session"); got != headTip {
+		t.Fatalf("expected no-remote-session to branch from prior HEAD, got %s want %s", got, headTip)
 	}
 }
 
