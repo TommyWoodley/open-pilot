@@ -192,33 +192,40 @@ func classifyAgentMetaLines(msg domain.Message, bodyLines []string) []bool {
 		return meta
 	}
 	inCommandOutput := false
+	allowErrorLine := false
 	for i, line := range bodyLines {
 		trimmed := strings.TrimLeft(line, " ")
 		switch {
 		case strings.HasPrefix(trimmed, "[agent-thought]"),
-			strings.HasPrefix(trimmed, "Running `"),
-			strings.HasPrefix(trimmed, "Running "),
-			strings.HasPrefix(trimmed, "Ran `"),
-			strings.HasPrefix(trimmed, "Ran "),
-			strings.HasPrefix(trimmed, "Explored `"),
-			strings.HasPrefix(trimmed, "Explored "),
-			strings.HasPrefix(trimmed, "Error:"),
+			runningCommandSummaryRegex.MatchString(trimmed),
+			completedCommandSummaryRegex.MatchString(trimmed),
+			exploredCommandSummaryRegex.MatchString(trimmed),
 			strings.HasPrefix(trimmed, "Running command:"),
 			strings.HasPrefix(trimmed, "Command completed"),
 			strings.HasPrefix(trimmed, "Command failed"),
 			strings.HasPrefix(trimmed, "Command output:"):
 			meta[i] = true
 			inCommandOutput = strings.HasPrefix(trimmed, "Command output:")
+			allowErrorLine = strings.HasPrefix(trimmed, "Command failed") || strings.Contains(trimmed, "(failed, exit=")
+		case allowErrorLine && strings.HasPrefix(trimmed, "Error:"):
+			meta[i] = true
+			inCommandOutput = false
+			allowErrorLine = false
 		case inCommandOutput:
 			meta[i] = true
+			allowErrorLine = false
 		default:
 			inCommandOutput = false
+			allowErrorLine = false
 		}
 	}
 	return meta
 }
 
 var sgrANSIRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+var runningCommandSummaryRegex = regexp.MustCompile(`^Running .+ \.\.\.$`)
+var completedCommandSummaryRegex = regexp.MustCompile(`^Ran .+ for .+`)
+var exploredCommandSummaryRegex = regexp.MustCompile(`^Explored(?: \d+ commands)? for .+`)
 
 func visibleTextWidth(s string) int {
 	plain := sgrANSIRegex.ReplaceAllString(s, "")

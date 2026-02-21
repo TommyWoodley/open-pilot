@@ -275,7 +275,7 @@ func TestNoStreamingCallbacksOnFinalizedMessage(t *testing.T) {
 func TestAgentMetaMarkersUseAgentMetaStyle(t *testing.T) {
 	msg := domain.Message{
 		Role:    domain.RoleAssistant,
-		Content: "[agent-thought] planning\nRunning ls ...\nExplored ls for 100ms\nError: permission denied",
+		Content: "[agent-thought] planning\nRunning `ls` ...\nRan `ls` for 100ms (failed, exit=1)\nError: permission denied",
 	}
 	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{
 		AgentMeta: func(s string) string { return "<m>" + s + "</m>" },
@@ -284,7 +284,7 @@ func TestAgentMetaMarkersUseAgentMetaStyle(t *testing.T) {
 	checks := []string{
 		"<m>[agent-thought] planning</m>",
 		"<m>Running ls ...</m>",
-		"<m>Explored ls for 100ms</m>",
+		"<m>Ran ls for 100ms (failed, exit=1)</m>",
 		"<m>Error: permission denied</m>",
 	}
 	for _, c := range checks {
@@ -301,6 +301,24 @@ func TestNormalAssistantOutputDoesNotUseAgentMetaStyle(t *testing.T) {
 	})
 	if strings.Contains(strings.Join(lines, "\n"), "<m>") {
 		t.Fatalf("did not expect meta style on normal assistant output")
+	}
+}
+
+func TestAssistantNarrativePrefixesDoNotUseAgentMetaStyle(t *testing.T) {
+	msg := domain.Message{
+		Role: domain.RoleAssistant,
+		Content: strings.Join([]string{
+			"Running through the plan for the UI bug:",
+			"Ran into two edge cases while reading tests.",
+			"Explored alternatives before choosing a fix.",
+			"Error: handling here refers to UX copy, not command failure.",
+		}, "\n"),
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{
+		AgentMeta: func(s string) string { return "<m>" + s + "</m>" },
+	})
+	if strings.Contains(strings.Join(lines, "\n"), "<m>") {
+		t.Fatalf("did not expect narrative assistant output to use meta style")
 	}
 }
 
