@@ -59,9 +59,26 @@ func TestParseHooksRun(t *testing.T) {
 	}
 }
 
+func TestParseReview(t *testing.T) {
+	cmd, isCommand, err := Parse("/review")
+	if err != nil || !isCommand {
+		t.Fatalf("expected review command parse success, err=%v isCommand=%v", err, isCommand)
+	}
+	if cmd.Kind != KindReview {
+		t.Fatalf("unexpected command: %#v", cmd)
+	}
+}
+
+func TestParseReviewInvalid(t *testing.T) {
+	_, isCommand, err := Parse("/review now")
+	if !isCommand || err == nil {
+		t.Fatalf("expected parse error for invalid review command")
+	}
+}
+
 func TestHelpTextContainsCommands(t *testing.T) {
 	h := HelpText()
-	if !strings.Contains(h, "/session new") || !strings.Contains(h, "/session delete") || !strings.Contains(h, "/provider status") || !strings.Contains(h, "/hooks run") {
+	if !strings.Contains(h, "/session new") || !strings.Contains(h, "/session delete") || !strings.Contains(h, "/provider status") || !strings.Contains(h, "/hooks run") || !strings.Contains(h, "/review") {
 		t.Fatalf("expected command help text to contain core commands")
 	}
 }

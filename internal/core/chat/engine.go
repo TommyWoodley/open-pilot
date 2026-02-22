@@ -69,6 +69,7 @@ type AutoReviewEvent struct {
 	SessionID string
 	Cycle     int
 	BaseRef   string
+	Progress  string
 	Result    autoReviewResult
 	Err       error
 }
@@ -327,9 +328,28 @@ func (e *Engine) RunCommand(cmd command.Command) {
 			return
 		}
 		e.runHooks(s, config.HookTriggerSessionStarted, "")
+	case command.KindReview:
+		e.startManualAutoReview()
 	default:
 		e.AddSystemMessage("Unknown command")
 	}
+}
+
+func (e *Engine) startManualAutoReview() {
+	s := e.Store.ActiveSession()
+	if s == nil {
+		e.AddSystemMessage("Create/select a session first: /session new <name>")
+		return
+	}
+	if s.ProviderID != "codex" {
+		e.AddSystemMessage("Automatic review requires provider codex: /provider use codex")
+		return
+	}
+	if strings.TrimSpace(e.repoPathForSession(s)) == "" {
+		e.AddSystemMessage("Add/select a repo first: /session add-repo <abs-path>")
+		return
+	}
+	e.handleAutoReviewCompletionTag(s)
 }
 
 func (e *Engine) runHooks(s *domain.Session, trigger config.HookTrigger, repoPath string) {
@@ -680,6 +700,7 @@ func (e *Engine) handleAutoReviewCompletionTag(s *domain.Session) {
 		return
 	}
 	if !state.active {
+		state.runID++
 		state.active = true
 		state.cycle = 0
 		state.running = false
@@ -713,6 +734,7 @@ func (e *Engine) runAutoReviewCycle(s *domain.Session, st *autoReviewState) {
 	}
 	st.cycle++
 	st.running = true
+	st.progressLines = nil
 	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Starting", "")
 	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Computing base", "")
 	repoPath := e.repoPathForSession(s)
@@ -721,16 +743,31 @@ func (e *Engine) runAutoReviewCycle(s *domain.Session, st *autoReviewState) {
 		e.failAutoReview(s.ID, st, "active repo is required")
 		return
 	}
-	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Running codex review", "")
+	e.emitAutoReviewStateWithItem(s.ID, st.cycle, e.autoReviewMaxCycles, "Running codex review", "", autoReviewProgressItemID(st.runID, st.cycle))
 	cycle := st.cycle
+	progress := func(line string) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			return
+		}
+		if e.autoReviewEvents == nil {
+			e.appendAutoReviewProgressLine(s.ID, st, cycle, line)
+			return
+		}
+		e.emitAutoReviewEvent(AutoReviewEvent{
+			SessionID: s.ID,
+			Cycle:     cycle,
+			Progress:  line,
+		})
+	}
 	if e.autoReviewEvents == nil {
-		baseRef, reviewResult, err := e.executeAutoReview(repoPath)
+		baseRef, reviewResult, err := e.executeAutoReview(repoPath, progress)
 		e.applyAutoReviewCycleResult(s, st, cycle, baseRef, reviewResult, err)
 		return
 	}
 	go func(sessionID string, cycleNum int, path string) {
-		baseRef, reviewResult, err := e.executeAutoReview(path)
-		e.emitAutoReviewEvent(AutoReviewEvent{
+		baseRef, reviewResult, err := e.executeAutoReview(path, progress)
+		e.emitAutoReviewCycleResultEvent(AutoReviewEvent{
 			SessionID: sessionID,
 			Cycle:     cycleNum,
 			BaseRef:   baseRef,
@@ -761,6 +798,23 @@ func (e *Engine) emitAutoReviewState(sessionID string, cycle, maxCycles int, sta
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(state) == "" {
 		return
 	}
+	e.Store.AddSessionSystemMessage(sessionID, renderAutoReviewStateMessage(cycle, maxCycles, state, detail))
+	e.StatusText = "Automatic review: " + state
+}
+
+func (e *Engine) emitAutoReviewStateWithItem(sessionID string, cycle, maxCycles int, state, detail, itemID string) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(state) == "" {
+		return
+	}
+	if strings.TrimSpace(itemID) == "" {
+		e.emitAutoReviewState(sessionID, cycle, maxCycles, state, detail)
+		return
+	}
+	e.upsertItemMessageWithRole(sessionID, "", itemID, renderAutoReviewStateMessage(cycle, maxCycles, state, detail), domain.RoleSystem)
+	e.StatusText = "Automatic review: " + state
+}
+
+func renderAutoReviewStateMessage(cycle, maxCycles int, state, detail string) string {
 	lines := []string{
 		"[[pilot-divider:Automatic Review]]",
 		fmt.Sprintf("Cycle: %d/%d", cycle, maxCycles),
@@ -770,8 +824,30 @@ func (e *Engine) emitAutoReviewState(sessionID string, cycle, maxCycles int, sta
 		lines = append(lines, detail)
 	}
 	lines = append(lines, "[[pilot-divider:]]")
-	e.Store.AddSessionSystemMessage(sessionID, strings.Join(lines, "\n"))
-	e.StatusText = "Automatic review: " + state
+	return strings.Join(lines, "\n")
+}
+
+func autoReviewProgressItemID(runID, cycle int) string {
+	return fmt.Sprintf("auto-review-progress-%d-%d", runID, cycle)
+}
+
+func (e *Engine) appendAutoReviewProgressLine(sessionID string, st *autoReviewState, cycle int, line string) {
+	if st == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return
+	}
+	st.progressLines = append(st.progressLines, trimmed)
+	e.emitAutoReviewStateWithItem(
+		sessionID,
+		cycle,
+		e.autoReviewMaxCycles,
+		"Running codex review",
+		strings.Join(st.progressLines, "\n"),
+		autoReviewProgressItemID(st.runID, cycle),
+	)
 }
 
 func (e *Engine) repoPathForSession(s *domain.Session) string {
@@ -786,12 +862,12 @@ func (e *Engine) repoPathForSession(s *domain.Session) string {
 	return ""
 }
 
-func (e *Engine) executeAutoReview(repoPath string) (string, autoReviewResult, error) {
+func (e *Engine) executeAutoReview(repoPath string, onProgress func(string)) (string, autoReviewResult, error) {
 	baseSHA, baseRef, err := e.autoReviewRunner.ResolveBase(repoPath)
 	if err != nil {
 		return "", autoReviewResult{}, err
 	}
-	reviewResult, err := e.autoReviewRunner.Review(repoPath, baseSHA)
+	reviewResult, err := e.autoReviewRunner.Review(repoPath, baseSHA, onProgress)
 	if err != nil {
 		return "", autoReviewResult{}, err
 	}
@@ -866,6 +942,61 @@ func (e *Engine) emitAutoReviewEvent(ev AutoReviewEvent) {
 	}
 }
 
+func (e *Engine) emitAutoReviewCycleResultEvent(ev AutoReviewEvent) {
+	if e.autoReviewEvents == nil {
+		return
+	}
+	ev.Progress = ""
+	select {
+	case e.autoReviewEvents <- ev:
+		return
+	default:
+	}
+
+	buffered := make([]AutoReviewEvent, 0, cap(e.autoReviewEvents))
+	for {
+		select {
+		case existing := <-e.autoReviewEvents:
+			buffered = append(buffered, existing)
+		default:
+			goto drained
+		}
+	}
+
+drained:
+	droppedProgress := false
+	kept := buffered[:0]
+	for _, existing := range buffered {
+		if !droppedProgress && strings.TrimSpace(existing.Progress) != "" {
+			droppedProgress = true
+			continue
+		}
+		kept = append(kept, existing)
+	}
+	for _, existing := range kept {
+		select {
+		case e.autoReviewEvents <- existing:
+		default:
+			if e.logf != nil {
+				e.logf("dropping auto-review event while restoring buffer: session=%s cycle=%d base=%s has_err=%t", strings.TrimSpace(existing.SessionID), existing.Cycle, strings.TrimSpace(existing.BaseRef), existing.Err != nil)
+			}
+		}
+	}
+	if !droppedProgress {
+		if e.logf != nil {
+			e.logf("dropping auto-review cycle result event: session=%s cycle=%d base=%s has_err=%t reason=no-progress-to-evict buffer=%d/%d", strings.TrimSpace(ev.SessionID), ev.Cycle, strings.TrimSpace(ev.BaseRef), ev.Err != nil, len(e.autoReviewEvents), cap(e.autoReviewEvents))
+		}
+		return
+	}
+	select {
+	case e.autoReviewEvents <- ev:
+	default:
+		if e.logf != nil {
+			e.logf("dropping auto-review cycle result event: session=%s cycle=%d base=%s has_err=%t reason=buffer-full-after-evict buffer=%d/%d", strings.TrimSpace(ev.SessionID), ev.Cycle, strings.TrimSpace(ev.BaseRef), ev.Err != nil, len(e.autoReviewEvents), cap(e.autoReviewEvents))
+		}
+	}
+}
+
 func (e *Engine) AutoReviewEvents() <-chan AutoReviewEvent {
 	return e.autoReviewEvents
 }
@@ -877,6 +1008,12 @@ func (e *Engine) HandleAutoReviewEvent(ev AutoReviewEvent) {
 	}
 	st := e.ensureAutoReviewState(ev.SessionID)
 	if !st.active {
+		return
+	}
+	if strings.TrimSpace(ev.Progress) != "" {
+		if ev.Cycle == st.cycle {
+			e.appendAutoReviewProgressLine(s.ID, st, st.cycle, ev.Progress)
+		}
 		return
 	}
 	e.applyAutoReviewCycleResult(s, st, ev.Cycle, ev.BaseRef, ev.Result, ev.Err)
