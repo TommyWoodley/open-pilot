@@ -123,6 +123,23 @@ func TestCodexAdapterSubsequentPromptUsesResume(t *testing.T) {
 	}
 }
 
+func TestCodexAdapterSubsequentPromptUsesResumeWhenSecondResponseIsDelayed(t *testing.T) {
+	env := setupFakeCodex(t, "delayed_success", "thread-resume-delayed", "ok")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-1", SessionID: "sess-1", RepoPath: env.repoDir, Text: "first prompt"}); err != nil {
+		t.Fatalf("send #1 failed: %v", err)
+	}
+	_ = waitEventType(t, events, EventFinal)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-2", SessionID: "sess-1", RepoPath: env.repoDir, Text: "second prompt"}); err != nil {
+		t.Fatalf("send #2 failed: %v", err)
+	}
+	_ = waitEventType(t, events, EventFinal)
+}
+
 func TestCodexAdapterFailureEmitsSingleConciseError(t *testing.T) {
 	env := setupFakeCodex(t, "fail", "", "")
 
@@ -284,6 +301,8 @@ type fakeCodexEnv struct {
 	argsFile string
 }
 
+const providerEventWaitTimeout = 10 * time.Second
+
 func setupFakeCodex(t *testing.T, mode, threadID, message string) fakeCodexEnv {
 	t.Helper()
 
@@ -312,6 +331,17 @@ mode="${OPEN_PILOT_MODE:-success}"
 thread_id="${OPEN_PILOT_THREAD_ID:-thread-123}"
 last_message="${OPEN_PILOT_LAST_MESSAGE:-hello}"
 if [ "$mode" = "success" ]; then
+  printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
+  printf '{"type":"response.output_text.delta","delta":"%s"}\n' "$last_message"
+  if [ -n "$out_file" ]; then
+    printf '%s' "$last_message" > "$out_file"
+  fi
+  exit 0
+fi
+if [ "$mode" = "delayed_success" ]; then
+  case "$*" in
+    *" resume "*) sleep 4 ;;
+  esac
   printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
   printf '{"type":"response.output_text.delta","delta":"%s"}\n' "$last_message"
   if [ -n "$out_file" ]; then
@@ -393,19 +423,22 @@ func startHandle(t *testing.T, adapter *codexCLIAdapter, repoDir string) (Sessio
 
 func waitEventType(t *testing.T, events <-chan Event, eventType string) Event {
 	t.Helper()
-	timer := time.NewTimer(3 * time.Second)
+	timer := time.NewTimer(providerEventWaitTimeout)
 	defer timer.Stop()
 
 	for {
 		select {
 		case <-timer.C:
-			t.Fatalf("timed out waiting for event %q", eventType)
+			t.Fatalf("timed out waiting for event %q after %s", eventType, providerEventWaitTimeout)
 		case ev, ok := <-events:
 			if !ok {
 				t.Fatalf("event channel closed while waiting for %q", eventType)
 			}
 			if ev.Type == eventType {
 				return ev
+			}
+			if ev.Type == EventError && eventType != EventError {
+				t.Fatalf("received error event while waiting for %q: %s (%v)", eventType, ev.Message, ev.Err)
 			}
 		}
 	}
