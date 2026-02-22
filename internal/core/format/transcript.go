@@ -142,9 +142,15 @@ func BuildTranscriptLines(messages []domain.Message, styles Styles) []string {
 			lines = append(lines, formatted.Prefix)
 		} else {
 			bodyLines := strings.Split(formatted.Body, "\n")
+			normalized := make([]string, 0, len(bodyLines))
 			for i := range bodyLines {
-				bodyLines[i] = normalizeTranscriptSectionTag(bodyLines[i])
+				line, omit := normalizeTranscriptSectionTag(bodyLines[i])
+				if omit {
+					continue
+				}
+				normalized = append(normalized, line)
 			}
+			bodyLines = normalized
 
 			metaMask := classifyAgentMetaLines(msg, bodyLines)
 			continuationIndent := strings.Repeat(" ", visibleTextWidth(formatted.Prefix)+1)
@@ -179,18 +185,18 @@ func isPilotDividerToken(line string) bool {
 	return strings.HasPrefix(trimmed, "[[pilot-divider:") && strings.HasSuffix(trimmed, "]]")
 }
 
-func normalizeTranscriptSectionTag(line string) string {
+func normalizeTranscriptSectionTag(line string) (string, bool) {
 	trimmed := strings.TrimSpace(line)
 	if matches := sectionStartTagRegex.FindStringSubmatch(trimmed); len(matches) == 2 {
-		return "[[pilot-divider:" + formatTranscriptSectionTitle(matches[1]) + "]]"
+		return "[[pilot-divider:" + formatTranscriptSectionTitle(matches[1]) + "]]", false
 	}
 	if matches := sectionEndTagRegex.FindStringSubmatch(trimmed); len(matches) == 2 {
-		return "[[pilot-divider:]]"
+		return "", true
 	}
 	if developmentWorkCompleteTagRegex.MatchString(trimmed) || developmentWorkCompleteAngleTagRegex.MatchString(trimmed) {
-		return "[[pilot-divider:Development Work Complete]]"
+		return "[[pilot-divider:Development Work Complete]]", false
 	}
-	return line
+	return line, false
 }
 
 func formatTranscriptSectionTitle(raw string) string {

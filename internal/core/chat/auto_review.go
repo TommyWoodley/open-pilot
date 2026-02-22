@@ -68,8 +68,8 @@ func (r *cliAutoReviewRunner) Review(repoPath string, baseSHA string) (autoRevie
 		return autoReviewResult{}, err
 	}
 	if !reviewable {
-		args = []string{"review"}
-		commandLabel = "codex review"
+		args = []string{"review", "--uncommitted"}
+		commandLabel = "codex review --uncommitted"
 		hasWorkingTree, err := r.hasReviewableWorkingTreeChanges(repoPath)
 		if err != nil {
 			return autoReviewResult{}, err
