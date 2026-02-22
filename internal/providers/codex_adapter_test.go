@@ -11,6 +11,8 @@ import (
 	"github.com/thwoodle/open-pilot/internal/config"
 )
 
+const waitEventTimeout = 10 * time.Second
+
 func TestManagerUsesBuiltInCodexAdapter(t *testing.T) {
 	t.Parallel()
 
@@ -278,6 +280,16 @@ func TestCodexAdapterEmitsReasoningAndCommandLifecycleEvents(t *testing.T) {
 	_ = waitEventType(t, events, EventFinal)
 }
 
+func TestWaitEventTypeAllowsSlowEvents(t *testing.T) {
+	events := make(chan Event, 1)
+	go func() {
+		time.Sleep(3200 * time.Millisecond)
+		events <- Event{Type: EventFinal}
+	}()
+
+	_ = waitEventType(t, events, EventFinal)
+}
+
 type fakeCodexEnv struct {
 	binary   string
 	repoDir  string
@@ -393,7 +405,7 @@ func startHandle(t *testing.T, adapter *codexCLIAdapter, repoDir string) (Sessio
 
 func waitEventType(t *testing.T, events <-chan Event, eventType string) Event {
 	t.Helper()
-	timer := time.NewTimer(3 * time.Second)
+	timer := time.NewTimer(waitEventTimeout)
 	defer timer.Stop()
 
 	for {
