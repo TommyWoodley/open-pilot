@@ -1,16 +1,21 @@
 package chat
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 type autoReviewState struct {
 	active               bool
 	cycle                int
+	running              bool
 	waitingForCompletion bool
 }
 
@@ -26,10 +31,14 @@ type autoReviewRunner interface {
 
 type cliAutoReviewRunner struct {
 	runCmd func(ctx context.Context, dir, name string, args ...string) (string, error)
+	logf   func(format string, args ...any)
 }
 
 func newCLIAutoReviewRunner() *cliAutoReviewRunner {
-	return &cliAutoReviewRunner{runCmd: runCommandCapture}
+	return &cliAutoReviewRunner{
+		runCmd: runCommandCapture,
+		logf:   logAutoReviewf,
+	}
 }
 
 func (r *cliAutoReviewRunner) ResolveBase(repoPath string) (string, string, error) {
@@ -50,9 +59,20 @@ func (r *cliAutoReviewRunner) ResolveBase(repoPath string) (string, string, erro
 }
 
 func (r *cliAutoReviewRunner) Review(repoPath string, baseSHA string) (autoReviewResult, error) {
+	revision := fmt.Sprintf("%s...HEAD", strings.TrimSpace(baseSHA))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	out, err := r.runCmd(ctx, repoPath, "codex", "review", fmt.Sprintf("%s...HEAD", strings.TrimSpace(baseSHA)))
+	if r.logf != nil {
+		r.logf("auto-review run repo=%s command=%q", repoPath, "codex review "+revision)
+	}
+	out, err := r.runCmd(ctx, repoPath, "codex", "review", revision)
 	cancel()
+	if r.logf != nil {
+		scanner := bufio.NewScanner(strings.NewReader(out))
+		for scanner.Scan() {
+			r.logf("auto-review output %s", scanner.Text())
+		}
+		r.logf("auto-review done err=%v", err)
+	}
 	trimmed := strings.TrimSpace(out)
 	if err != nil && trimmed == "" {
 		return autoReviewResult{}, err
@@ -98,13 +118,26 @@ func buildAutoReviewPrompt(baseRef, reviewSummary string) string {
 
 func summarizeAutoReviewDetail(text string) string {
 	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	const max = 500
-	if len(text) <= max {
-		return text
-	}
-	return text[:max] + "..."
+	return text
 }
 
+var autoReviewLogMu sync.Mutex
+
+func logAutoReviewf(format string, args ...any) {
+	path := strings.TrimSpace(os.Getenv("OPEN_PILOT_CODEX_DEBUG_LOG"))
+	if path == "" {
+		path = filepath.Join(os.TempDir(), "open-pilot-codex-debug.log")
+	}
+
+	autoReviewLogMu.Lock()
+	defer autoReviewLogMu.Unlock()
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	line := fmt.Sprintf(format, args...)
+	_, _ = fmt.Fprintf(f, "%s [auto-review] %s\n", time.Now().UTC().Format(time.RFC3339Nano), line)
+}

@@ -31,8 +31,9 @@ type Model struct {
 	ActiveSessionID string
 	pending         map[string]int
 
-	providerEvents <-chan providers.Event
-	hookEvents     <-chan corechat.HookEvent
+	providerEvents   <-chan providers.Event
+	hookEvents       <-chan corechat.HookEvent
+	autoReviewEvents <-chan corechat.AutoReviewEvent
 
 	ProviderState  string
 	StatusText     string
@@ -52,11 +53,13 @@ func NewModel(manager providers.Manager, cfg config.Config, persister ...coreses
 	}
 	chat := corechat.NewEngine(store, manager, cfg)
 	chat.EnableAsyncHooks()
+	chat.EnableAsyncAutoReview()
 	m := Model{
 		store:                store,
 		chat:                 chat,
 		providerEvents:       chat.ProviderEvents(),
 		hookEvents:           chat.HookEvents(),
+		autoReviewEvents:     chat.AutoReviewEvents(),
 		ProviderState:        chat.ProviderState,
 		StatusText:           chat.StatusText,
 		GeneratingTick:       0,
@@ -77,12 +80,15 @@ func NewModel(manager providers.Manager, cfg config.Config, persister ...coreses
 
 // Init performs startup work.
 func (m Model) Init() tea.Cmd {
-	cmds := make([]tea.Cmd, 0, 3)
+	cmds := make([]tea.Cmd, 0, 4)
 	if m.providerEvents != nil {
 		cmds = append(cmds, waitProviderEvent(m.providerEvents))
 	}
 	if m.hookEvents != nil {
 		cmds = append(cmds, waitHookEvent(m.hookEvents))
+	}
+	if m.autoReviewEvents != nil {
+		cmds = append(cmds, waitAutoReviewEvent(m.autoReviewEvents))
 	}
 	cmds = append(cmds, generationTickCmd())
 	return tea.Batch(cmds...)

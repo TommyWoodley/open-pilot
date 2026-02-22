@@ -92,6 +92,10 @@ type hookEventMsg struct {
 	event corechat.HookEvent
 }
 
+type autoReviewEventMsg struct {
+	event corechat.AutoReviewEvent
+}
+
 func waitProviderEvent(ch <-chan providers.Event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
@@ -109,6 +113,16 @@ func waitHookEvent(ch <-chan corechat.HookEvent) tea.Cmd {
 			return nil
 		}
 		return hookEventMsg{event: ev}
+	}
+}
+
+func waitAutoReviewEvent(ch <-chan corechat.AutoReviewEvent) tea.Cmd {
+	return func() tea.Msg {
+		ev, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return autoReviewEventMsg{event: ev}
 	}
 }
 
@@ -212,6 +226,17 @@ func (m *Model) consumeStoreWarning() {
 
 func (m *Model) handleHookEvent(ev corechat.HookEvent) {
 	m.chat.HandleHookEvent(ev)
+	m.ProviderState = m.chat.ProviderState
+	m.StatusText = m.chat.StatusText
+	m.ActiveSessionID = m.store.ActiveSessionID
+	if m.AutoFollowTranscript {
+		m.TranscriptScroll = 0
+	}
+	m.consumeStoreWarning()
+}
+
+func (m *Model) handleAutoReviewEvent(ev corechat.AutoReviewEvent) {
+	m.chat.HandleAutoReviewEvent(ev)
 	m.ProviderState = m.chat.ProviderState
 	m.StatusText = m.chat.StatusText
 	m.ActiveSessionID = m.store.ActiveSessionID
