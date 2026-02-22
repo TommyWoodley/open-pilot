@@ -20,6 +20,24 @@ go run ./cmd/open-pilot
 go build ./cmd/open-pilot
 ```
 
+## Local CI checks
+
+Run the same checks used in CI:
+
+```bash
+go test ./...
+go vet ./...
+```
+
+## GitHub Actions CI
+
+CI runs on pushes to `master` and pull requests targeting `master`.
+Checks executed:
+- `go test ./...`
+- `go vet ./...`
+
+Linting can be added later after current lint debt is cleaned up.
+
 ## Slash commands
 
 - `/session new <name>` (auto-sets provider to `codex` and pre-fills repo setup)
