@@ -37,16 +37,32 @@ func Default() Config {
 }
 
 func resolveBuiltinAssetsRoot() string {
+	callerRoot := ""
 	if _, file, _, ok := runtime.Caller(0); ok {
-		if root := resolveBuiltinAssetsRootFrom(filepath.Dir(file)); root != "" {
-			return root
-		}
+		callerRoot = resolveBuiltinAssetsRootFrom(filepath.Dir(file))
 	}
-	wd, err := os.Getwd()
+	return chooseBuiltinAssetsRoot(callerRoot, os.Getwd)
+}
+
+func chooseBuiltinAssetsRoot(callerRoot string, getwd func() (string, error)) string {
+	if hasGoModFile(callerRoot) {
+		return filepath.Clean(callerRoot)
+	}
+
+	wd, err := getwd()
 	if err != nil {
 		return "."
 	}
 	return resolveBuiltinAssetsRootFrom(wd)
+}
+
+func hasGoModFile(root string) bool {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(filepath.Clean(root), "go.mod"))
+	return err == nil && !info.IsDir()
 }
 
 func resolveBuiltinAssetsRootFrom(start string) string {
