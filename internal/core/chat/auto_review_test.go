@@ -89,7 +89,7 @@ func TestReviewTreatsApprovedOutputAsApproved(t *testing.T) {
 			return "", nil
 		},
 	}
-	out, err := r.Review("/tmp/repo", "abc123")
+	out, err := r.Review("/tmp/repo", "abc123", nil)
 	if err != nil {
 		t.Fatalf("review: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestReviewTreatsNonApprovedOutputAsComments(t *testing.T) {
 			return "", nil
 		},
 	}
-	out, err := r.Review("/tmp/repo", "abc123")
+	out, err := r.Review("/tmp/repo", "abc123", nil)
 	if err != nil {
 		t.Fatalf("review: %v", err)
 	}
@@ -131,6 +131,7 @@ func TestReviewWritesDebugLog(t *testing.T) {
 	t.Setenv("OPEN_PILOT_CODEX_DEBUG_LOG", logPath)
 
 	r := newCLIAutoReviewRunner()
+	r.runReviewCmd = nil
 	r.runCmd = func(_ context.Context, _ string, name string, args ...string) (string, error) {
 		if name == "git" {
 			if len(args) >= 2 && args[0] == "diff" && args[1] == "--quiet" {
@@ -141,7 +142,7 @@ func TestReviewWritesDebugLog(t *testing.T) {
 		return "line one\nline two\n", nil
 	}
 
-	if _, err := r.Review("/tmp/repo", "abc123"); err != nil {
+	if _, err := r.Review("/tmp/repo", "abc123", nil); err != nil {
 		t.Fatalf("review: %v", err)
 	}
 
@@ -155,6 +156,42 @@ func TestReviewWritesDebugLog(t *testing.T) {
 	}
 	if !containsAll(text, "auto-review run", "codex review abc123...HEAD", "line one", "line two") {
 		t.Fatalf("expected review command and output in log, got %q", text)
+	}
+}
+
+func TestReviewStreamsCommandOutputLines(t *testing.T) {
+	r := &cliAutoReviewRunner{
+		runCmd: func(_ context.Context, _ string, name string, args ...string) (string, error) {
+			if name == "git" {
+				if len(args) >= 2 && args[0] == "diff" && args[1] == "--quiet" {
+					return "", &fakeExitError{code: 1}
+				}
+				return "", nil
+			}
+			t.Fatalf("unexpected command: %s %#v", name, args)
+			return "", nil
+		},
+		runReviewCmd: func(_ context.Context, _ string, _ string, _ []string, onLine func(string)) (string, error) {
+			if onLine != nil {
+				onLine("line one")
+				onLine("line two")
+			}
+			return "line one\nline two\n", nil
+		},
+	}
+
+	var streamed []string
+	out, err := r.Review("/tmp/repo", "abc123", func(line string) {
+		streamed = append(streamed, line)
+	})
+	if err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if out.Summary == "" {
+		t.Fatalf("expected summary")
+	}
+	if len(streamed) != 2 || streamed[0] != "line one" || streamed[1] != "line two" {
+		t.Fatalf("expected streamed lines, got %#v", streamed)
 	}
 }
 
@@ -185,7 +222,7 @@ func TestReviewUsesWorkingTreeWhenNoCommittedDiff(t *testing.T) {
 		},
 	}
 
-	out, err := r.Review("/tmp/repo", "abc123")
+	out, err := r.Review("/tmp/repo", "abc123", nil)
 	if err != nil {
 		t.Fatalf("review: %v", err)
 	}
@@ -219,7 +256,7 @@ func TestReviewSkipsGitignoreOnlyChanges(t *testing.T) {
 		},
 	}
 
-	out, err := r.Review("/tmp/repo", "abc123")
+	out, err := r.Review("/tmp/repo", "abc123", nil)
 	if err != nil {
 		t.Fatalf("review: %v", err)
 	}

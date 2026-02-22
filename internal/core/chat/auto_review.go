@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,9 +16,11 @@ import (
 
 type autoReviewState struct {
 	active               bool
+	runID                int
 	cycle                int
 	running              bool
 	waitingForCompletion bool
+	progressLines        []string
 }
 
 type autoReviewResult struct {
@@ -27,18 +30,20 @@ type autoReviewResult struct {
 
 type autoReviewRunner interface {
 	ResolveBase(repoPath string) (baseSHA string, baseRef string, err error)
-	Review(repoPath string, baseSHA string) (autoReviewResult, error)
+	Review(repoPath string, baseSHA string, onOutput func(string)) (autoReviewResult, error)
 }
 
 type cliAutoReviewRunner struct {
-	runCmd func(ctx context.Context, dir, name string, args ...string) (string, error)
-	logf   func(format string, args ...any)
+	runCmd       func(ctx context.Context, dir, name string, args ...string) (string, error)
+	runReviewCmd func(ctx context.Context, dir, name string, args []string, onLine func(string)) (string, error)
+	logf         func(format string, args ...any)
 }
 
 func newCLIAutoReviewRunner() *cliAutoReviewRunner {
 	return &cliAutoReviewRunner{
-		runCmd: runCommandCapture,
-		logf:   logAutoReviewf,
+		runCmd:       runCommandCapture,
+		runReviewCmd: runCommandStream,
+		logf:         logAutoReviewf,
 	}
 }
 
@@ -59,7 +64,7 @@ func (r *cliAutoReviewRunner) ResolveBase(repoPath string) (string, string, erro
 	return "", "", fmt.Errorf("failed to resolve base with origin/main or origin/master")
 }
 
-func (r *cliAutoReviewRunner) Review(repoPath string, baseSHA string) (autoReviewResult, error) {
+func (r *cliAutoReviewRunner) Review(repoPath string, baseSHA string, onOutput func(string)) (autoReviewResult, error) {
 	revision := fmt.Sprintf("%s...HEAD", strings.TrimSpace(baseSHA))
 	args := []string{"review", revision}
 	commandLabel := "codex review " + revision
@@ -85,13 +90,29 @@ func (r *cliAutoReviewRunner) Review(repoPath string, baseSHA string) (autoRevie
 	if r.logf != nil {
 		r.logf("auto-review run repo=%s command=%q", repoPath, commandLabel)
 	}
-	out, err := r.runCmd(ctx, repoPath, "codex", args...)
-	cancel()
-	if r.logf != nil {
+	streamLine := func(line string) {
+		if strings.TrimSpace(line) == "" {
+			return
+		}
+		if onOutput != nil {
+			onOutput(line)
+		}
+		if r.logf != nil {
+			r.logf("auto-review output %s", line)
+		}
+	}
+	var out string
+	if r.runReviewCmd != nil {
+		out, err = r.runReviewCmd(ctx, repoPath, "codex", args, streamLine)
+	} else {
+		out, err = r.runCmd(ctx, repoPath, "codex", args...)
 		scanner := bufio.NewScanner(strings.NewReader(out))
 		for scanner.Scan() {
-			r.logf("auto-review output %s", scanner.Text())
+			streamLine(scanner.Text())
 		}
+	}
+	cancel()
+	if r.logf != nil {
 		r.logf("auto-review done err=%v", err)
 	}
 	trimmed := strings.TrimSpace(out)
@@ -172,6 +193,70 @@ func runCommandCapture(ctx context.Context, dir, name string, args ...string) (s
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+func runCommandStream(ctx context.Context, dir, name string, args []string, onLine func(string)) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	lineCh := make(chan string, 32)
+	var wg sync.WaitGroup
+	var readErrOnce sync.Once
+	var readErr error
+
+	readPipe := func(r io.Reader) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(r)
+		buf := make([]byte, 0, 64*1024)
+		scanner.Buffer(buf, 1024*1024)
+		for scanner.Scan() {
+			lineCh <- scanner.Text()
+		}
+		if err := scanner.Err(); err != nil {
+			readErrOnce.Do(func() {
+				readErr = err
+			})
+		}
+	}
+
+	wg.Add(2)
+	go readPipe(stdout)
+	go readPipe(stderr)
+	go func() {
+		wg.Wait()
+		close(lineCh)
+	}()
+
+	var b strings.Builder
+	first := true
+	for line := range lineCh {
+		if !first {
+			b.WriteByte('\n')
+		}
+		first = false
+		b.WriteString(line)
+		if onLine != nil {
+			onLine(line)
+		}
+	}
+
+	waitErr := cmd.Wait()
+	if readErr != nil {
+		return strings.TrimSpace(b.String()), readErr
+	}
+	return strings.TrimSpace(b.String()), waitErr
 }
 
 func autoReviewApprovedFromOutput(output string) bool {

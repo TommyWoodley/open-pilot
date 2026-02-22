@@ -42,6 +42,7 @@ type fakeAutoReviewRunner struct {
 	baseErr       error
 	results       []autoReviewResult
 	reviewErr     error
+	progressLines []string
 	resolveCalls  int
 	reviewCalls   int
 	reviewStarted chan struct{}
@@ -63,12 +64,17 @@ func (f *fakeAutoReviewRunner) ResolveBase(string) (string, string, error) {
 	return f.base, f.ref, nil
 }
 
-func (f *fakeAutoReviewRunner) Review(string, string) (autoReviewResult, error) {
+func (f *fakeAutoReviewRunner) Review(_ string, _ string, onOutput func(string)) (autoReviewResult, error) {
 	f.reviewCalls++
 	if f.reviewStarted != nil {
 		select {
 		case f.reviewStarted <- struct{}{}:
 		default:
+		}
+	}
+	for _, line := range f.progressLines {
+		if onOutput != nil {
+			onOutput(line)
 		}
 	}
 	if f.reviewBlock != nil {
@@ -83,6 +89,79 @@ func (f *fakeAutoReviewRunner) Review(string, string) (autoReviewResult, error) 
 	out := f.results[0]
 	f.results = f.results[1:]
 	return out, nil
+}
+
+func TestAutoReviewStreamsProgressLinesWhenAsyncEnabled(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+	releaseReview := make(chan struct{})
+	reviewStarted := make(chan struct{}, 1)
+	eng.autoReviewRunner = &fakeAutoReviewRunner{
+		base:          "abc123",
+		ref:           "origin/main",
+		results:       []autoReviewResult{{Approved: true, Summary: "approved"}},
+		progressLines: []string{"checking file a.go"},
+		reviewStarted: reviewStarted,
+		reviewBlock:   releaseReview,
+	}
+	eng.EnableAsyncAutoReview()
+
+	done := make(chan struct{})
+	go func() {
+		eng.HandleProviderEvent(providers.Event{
+			Type:      providers.EventFinal,
+			SessionID: s.ID,
+			Text:      "<DEVELOPMENT_WORK_COMPLETE>",
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("expected completion-tag handling to return immediately")
+	}
+
+	select {
+	case <-reviewStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("expected async review worker to start")
+	}
+
+	select {
+	case ev := <-eng.AutoReviewEvents():
+		eng.HandleAutoReviewEvent(ev)
+	case <-time.After(time.Second):
+		t.Fatalf("expected streamed progress event")
+	}
+	joined := ""
+	for _, m := range store.ActiveSession().Messages {
+		joined += m.Content + "\n"
+	}
+	if !strings.Contains(joined, "checking file a.go") {
+		t.Fatalf("expected streamed progress in transcript, got %q", joined)
+	}
+
+	close(releaseReview)
+	select {
+	case ev := <-eng.AutoReviewEvents():
+		eng.HandleAutoReviewEvent(ev)
+	case <-time.After(time.Second):
+		t.Fatalf("expected final review event")
+	}
+	joined = ""
+	for _, m := range store.ActiveSession().Messages {
+		joined += m.Content + "\n"
+	}
+	if !strings.Contains(joined, "State: Review approved") {
+		t.Fatalf("expected async flow to complete review, got %q", joined)
+	}
 }
 
 func TestAutoReviewCompletionTagDoesNotBlockWhenAsyncEnabled(t *testing.T) {
@@ -142,6 +221,91 @@ func TestAutoReviewCompletionTagDoesNotBlockWhenAsyncEnabled(t *testing.T) {
 	}
 	if !strings.Contains(joined, "State: Review approved") {
 		t.Fatalf("expected async flow to complete review, got %q", joined)
+	}
+}
+
+func TestAutoReviewDeliversCycleResultWhenProgressFloodsQueue(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+	releaseReview := make(chan struct{})
+	reviewStarted := make(chan struct{}, 1)
+	eng.autoReviewRunner = &fakeAutoReviewRunner{
+		base:          "abc123",
+		ref:           "origin/main",
+		results:       []autoReviewResult{{Approved: true, Summary: "approved"}},
+		progressLines: []string{"line 1", "line 2", "line 3"},
+		reviewStarted: reviewStarted,
+		reviewBlock:   releaseReview,
+	}
+	eng.EnableAsyncAutoReview()
+	eng.autoReviewEvents = make(chan AutoReviewEvent, 1)
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventFinal,
+		SessionID: s.ID,
+		Text:      "<DEVELOPMENT_WORK_COMPLETE>",
+	})
+
+	select {
+	case <-reviewStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("expected async review worker to start")
+	}
+	close(releaseReview)
+	time.Sleep(50 * time.Millisecond)
+
+	deadline := time.After(500 * time.Millisecond)
+	gotTerminal := false
+	for !gotTerminal {
+		select {
+		case ev := <-eng.AutoReviewEvents():
+			eng.HandleAutoReviewEvent(ev)
+			if strings.TrimSpace(ev.Progress) == "" {
+				gotTerminal = true
+			}
+		case <-deadline:
+			t.Fatalf("expected terminal auto-review event even when progress output is high-volume")
+		}
+	}
+}
+
+func TestAutoReviewProgressLinesUpsertIntoSingleRunningBlock(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	eng.EnableAsyncAutoReview()
+
+	st := eng.ensureAutoReviewState(s.ID)
+	st.active = true
+	st.cycle = 1
+
+	eng.HandleAutoReviewEvent(AutoReviewEvent{
+		SessionID: s.ID,
+		Cycle:     1,
+		Progress:  "line one",
+	})
+	eng.HandleAutoReviewEvent(AutoReviewEvent{
+		SessionID: s.ID,
+		Cycle:     1,
+		Progress:  "line two",
+	})
+
+	msgs := store.ActiveSession().Messages
+	if len(msgs) != 1 {
+		t.Fatalf("expected single running block for progress stream, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, "State: Running codex review") {
+		t.Fatalf("expected running state header in progress block, got %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "line one") || !strings.Contains(msgs[0].Content, "line two") {
+		t.Fatalf("expected both streamed lines in same progress block, got %q", msgs[0].Content)
 	}
 }
 
@@ -1127,6 +1291,107 @@ func TestHooksRunClearsBlockedStateOnSuccess(t *testing.T) {
 	}
 	if eng.StatusText != "Hooks passed" {
 		t.Fatalf("expected hooks passed status, got %q", eng.StatusText)
+	}
+}
+
+func TestRunCommandReviewStartsAutoReviewCycle(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+	runner := &fakeAutoReviewRunner{
+		base:    "abc123",
+		ref:     "origin/main",
+		results: []autoReviewResult{{Approved: true, Summary: "approved"}},
+	}
+	eng.autoReviewRunner = runner
+
+	eng.RunCommand(command.Command{Kind: command.KindReview})
+
+	if runner.resolveCalls != 1 || runner.reviewCalls != 1 {
+		t.Fatalf("expected one review cycle, resolve=%d review=%d", runner.resolveCalls, runner.reviewCalls)
+	}
+	joined := ""
+	for _, m := range s.Messages {
+		joined += m.Content + "\n"
+	}
+	if !containsAll(joined, "[[pilot-divider:Automatic Review]]", "Cycle: 1/5", "State: Review approved") {
+		t.Fatalf("expected review state messages, got %q", joined)
+	}
+}
+
+func TestRunCommandReviewResumesWhenWaitingForCompletion(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	repoPath := t.TempDir()
+	if err := store.AddRepoToActiveSession(repoPath, "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+	runner := &fakeAutoReviewRunner{
+		base: "abc123",
+		ref:  "origin/main",
+		results: []autoReviewResult{
+			{Approved: false, Summary: "fix me"},
+			{Approved: true, Summary: "approved"},
+		},
+	}
+	eng.autoReviewRunner = runner
+
+	eng.RunCommand(command.Command{Kind: command.KindReview})
+	if len(mgr.sends) != 1 {
+		t.Fatalf("expected remediation prompt after first cycle, got %d", len(mgr.sends))
+	}
+	st := eng.autoReviewBySession[s.ID]
+	if st == nil || !st.waitingForCompletion {
+		t.Fatalf("expected auto-review to wait for completion after comments")
+	}
+
+	eng.RunCommand(command.Command{Kind: command.KindReview})
+	if runner.reviewCalls != 2 {
+		t.Fatalf("expected second cycle to run when /review is entered again, got %d calls", runner.reviewCalls)
+	}
+	joined := ""
+	for _, m := range s.Messages {
+		joined += m.Content + "\n"
+	}
+	if !containsAll(joined, "Cycle: 2/5", "State: Review approved") {
+		t.Fatalf("expected second cycle approval state, got %q", joined)
+	}
+}
+
+func TestRunCommandReviewSecondRunKeepsPriorProgressBlock(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+	eng.autoReviewRunner = &fakeAutoReviewRunner{
+		base:    "abc123",
+		ref:     "origin/main",
+		results: []autoReviewResult{{Approved: true, Summary: "approved"}, {Approved: true, Summary: "approved"}},
+	}
+
+	eng.RunCommand(command.Command{Kind: command.KindReview})
+	eng.RunCommand(command.Command{Kind: command.KindReview})
+
+	runningBlocks := 0
+	for _, m := range s.Messages {
+		if strings.Contains(m.Content, "State: Running codex review") {
+			runningBlocks++
+		}
+	}
+	if runningBlocks != 2 {
+		t.Fatalf("expected one running progress block per review run, got %d", runningBlocks)
 	}
 }
 
