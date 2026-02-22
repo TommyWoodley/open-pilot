@@ -992,7 +992,7 @@ func (e *Engine) upsertItemMessageWithRole(sessionID, requestID, itemID, content
 		}
 		delete(e.itemRefs, key)
 	}
-	idx := -1
+	var idx int
 	if role == domain.RoleSystem {
 		idx = e.Store.AppendSystemMessage(sessionID, content)
 	} else {
@@ -1217,28 +1217,6 @@ func conciseReasoningText(text string) string {
 	text = replacer.Replace(text)
 	text = strings.Join(strings.Fields(text), " ")
 	return truncateRunes(text, 140)
-}
-
-func summarizeCommandOutput(output string, maxLines, maxChars int) string {
-	out := strings.TrimSpace(output)
-	if out == "" {
-		return ""
-	}
-	lines := strings.Split(out, "\n")
-	truncated := false
-	if maxLines > 0 && len(lines) > maxLines {
-		lines = lines[:maxLines]
-		truncated = true
-	}
-	out = strings.Join(lines, "\n")
-	if maxChars > 0 && utf8.RuneCountInString(out) > maxChars {
-		out = truncateRunes(out, maxChars)
-		truncated = true
-	}
-	if truncated {
-		return out + "\n... (truncated)"
-	}
-	return out
 }
 
 func truncateRunes(input string, limit int) string {
