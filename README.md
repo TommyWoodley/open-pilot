@@ -42,6 +42,8 @@ go build ./cmd/open-pilot
   - `repo.selected` (runs on `/session add-repo`, `/session repo use`, and `/session use` when an active repo exists)
   - `provider.codex.selected` (runs on `/provider use codex` and on `/session new` when codex is default)
   - `development.work.complete` (runs each time assistant output includes `[DEVELOPMENT_WORK_COMPLETE]`, `[<DEVELOPMENT_WORK_COMPLETE>]`, or `<DEVELOPMENT_WORK_COMPLETE>`)
+    - Also triggers automatic Codex review cycles in chat engine: review current branch changes vs base (`origin/main` fallback `origin/master`), ask Codex to address review comments, and repeat up to 5 cycles until approved/no comments.
+    - Automatic review publishes state headings as system messages (for example `Automatic Review`, `Cycle: N/5`, and `State: ...`).
 - `install-builtin-skills-on-codex-select` pulls superpowers skills from GitHub (`TommyWoodley/pilot-superpowers@main`) and installs them into `~/.codex/skills`.
 
 ## Wrapper protocol

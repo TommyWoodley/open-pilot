@@ -87,6 +87,9 @@ type Engine struct {
 	asyncHookRuns bool
 	unknownSeen   map[string]struct{}
 	nowFn         func() time.Time
+	autoReviewBySession map[string]*autoReviewState
+	autoReviewRunner    autoReviewRunner
+	autoReviewMaxCycles int
 }
 
 func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config) *Engine {
@@ -105,6 +108,9 @@ func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config)
 		hookProgress:  make(map[string]hookProgressState),
 		unknownSeen:   make(map[string]struct{}),
 		nowFn:         time.Now,
+		autoReviewBySession: make(map[string]*autoReviewState),
+		autoReviewRunner:    newCLIAutoReviewRunner(),
+		autoReviewMaxCycles: 5,
 	}
 }
 
@@ -634,6 +640,128 @@ func (e *Engine) runDevelopmentWorkCompleteHooksForContent(s *domain.Session, co
 	for i := 0; i < count; i++ {
 		e.runHooks(s, config.HookTriggerDevelopmentWorkComplete, repoPath)
 	}
+	e.handleAutoReviewCompletionTag(s)
+}
+
+func (e *Engine) handleAutoReviewCompletionTag(s *domain.Session) {
+	if s == nil {
+		return
+	}
+	if s.ProviderID != "codex" {
+		return
+	}
+	repoPath := e.repoPathForSession(s)
+	if strings.TrimSpace(repoPath) == "" {
+		return
+	}
+	if e.autoReviewRunner == nil {
+		return
+	}
+	state := e.ensureAutoReviewState(s.ID)
+	if !state.active {
+		state.active = true
+		state.cycle = 0
+		state.waitingForCompletion = false
+		e.runAutoReviewCycle(s, state)
+		return
+	}
+	if state.waitingForCompletion {
+		state.waitingForCompletion = false
+		e.runAutoReviewCycle(s, state)
+	}
+}
+
+func (e *Engine) ensureAutoReviewState(sessionID string) *autoReviewState {
+	if st, ok := e.autoReviewBySession[sessionID]; ok && st != nil {
+		return st
+	}
+	st := &autoReviewState{}
+	e.autoReviewBySession[sessionID] = st
+	return st
+}
+
+func (e *Engine) runAutoReviewCycle(s *domain.Session, st *autoReviewState) {
+	if s == nil || st == nil {
+		return
+	}
+	if st.cycle >= e.autoReviewMaxCycles {
+		e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Max cycles reached (5)", "Manual follow-up required.")
+		e.finishAutoReview(st)
+		return
+	}
+	st.cycle++
+	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Starting", "")
+	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Computing base", "")
+	repoPath := e.repoPathForSession(s)
+	if strings.TrimSpace(repoPath) == "" {
+		e.failAutoReview(s.ID, st, "active repo is required")
+		return
+	}
+	baseSHA, baseRef, err := e.autoReviewRunner.ResolveBase(repoPath)
+	if err != nil {
+		e.failAutoReview(s.ID, st, err.Error())
+		return
+	}
+	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Running codex review", "")
+	reviewResult, err := e.autoReviewRunner.Review(repoPath, baseSHA)
+	if err != nil {
+		e.failAutoReview(s.ID, st, err.Error())
+		return
+	}
+	if reviewResult.Approved {
+		e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Review approved", summarizeAutoReviewDetail(reviewResult.Summary))
+		e.finishAutoReview(st)
+		return
+	}
+	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Review requires changes", summarizeAutoReviewDetail(reviewResult.Summary))
+	if st.cycle >= e.autoReviewMaxCycles {
+		e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Max cycles reached (5)", "Manual follow-up required.")
+		e.finishAutoReview(st)
+		return
+	}
+	if e.Manager == nil {
+		e.failAutoReview(s.ID, st, "provider manager is unavailable")
+		return
+	}
+	prompt := buildAutoReviewPrompt(baseRef, reviewResult.Summary)
+	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Resuming agent to address feedback", "")
+	reqID := e.Store.NextID("req")
+	if err := e.Manager.SendPrompt(context.Background(), s.ProviderID, s.ID, repoPath, reqID, prompt); err != nil {
+		e.failAutoReview(s.ID, st, "failed to resume agent: "+err.Error())
+		return
+	}
+	st.waitingForCompletion = true
+	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Waiting for DEVELOPMENT_WORK_COMPLETE", "")
+}
+
+func (e *Engine) finishAutoReview(st *autoReviewState) {
+	if st == nil {
+		return
+	}
+	st.active = false
+	st.waitingForCompletion = false
+}
+
+func (e *Engine) failAutoReview(sessionID string, st *autoReviewState, reason string) {
+	e.emitAutoReviewState(sessionID, st.cycle, e.autoReviewMaxCycles, "Error", summarizeAutoReviewDetail(reason))
+	e.finishAutoReview(st)
+}
+
+func (e *Engine) emitAutoReviewState(sessionID string, cycle, maxCycles int, state, detail string) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(state) == "" {
+		return
+	}
+	lines := []string{
+		"[[pilot-divider:Automatic Review]]",
+		fmt.Sprintf("Cycle: %d/%d", cycle, maxCycles),
+		"State: " + state,
+	}
+	if strings.TrimSpace(detail) != "" {
+		lines = append(lines, detail)
+	}
+	lines = append(lines, "[[pilot-divider:]]")
+	e.Store.AddSessionSystemMessage(sessionID, strings.Join(lines, "\n"))
+	e.StatusText = "Automatic review: " + state
 }
 
 func (e *Engine) repoPathForSession(s *domain.Session) string {

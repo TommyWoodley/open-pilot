@@ -16,6 +16,16 @@ import (
 
 type fakeManager struct {
 	events chan providers.Event
+	sends []fakeSendPromptCall
+	err   error
+}
+
+type fakeSendPromptCall struct {
+	providerID string
+	sessionID  string
+	repoPath   string
+	requestID  string
+	prompt     string
 }
 
 type fakeHooks struct {
@@ -25,6 +35,16 @@ type fakeHooks struct {
 	lastRepoPath string
 }
 
+type fakeAutoReviewRunner struct {
+	base         string
+	ref          string
+	baseErr      error
+	results      []autoReviewResult
+	reviewErr    error
+	resolveCalls int
+	reviewCalls  int
+}
+
 func (f *fakeHooks) Run(_ context.Context, trigger config.HookTrigger, _ string, _ string, repoPath string, _ func(corehooks.ProgressUpdate)) corehooks.RunResult {
 	f.calls++
 	f.lastTrigger = trigger
@@ -32,8 +52,36 @@ func (f *fakeHooks) Run(_ context.Context, trigger config.HookTrigger, _ string,
 	return f.result
 }
 
-func (f *fakeManager) SendPrompt(context.Context, string, string, string, string, string) error {
-	return nil
+func (f *fakeAutoReviewRunner) ResolveBase(string) (string, string, error) {
+	f.resolveCalls++
+	if f.baseErr != nil {
+		return "", "", f.baseErr
+	}
+	return f.base, f.ref, nil
+}
+
+func (f *fakeAutoReviewRunner) Review(string, string) (autoReviewResult, error) {
+	f.reviewCalls++
+	if f.reviewErr != nil {
+		return autoReviewResult{}, f.reviewErr
+	}
+	if len(f.results) == 0 {
+		return autoReviewResult{Approved: true, Summary: "approved"}, nil
+	}
+	out := f.results[0]
+	f.results = f.results[1:]
+	return out, nil
+}
+
+func (f *fakeManager) SendPrompt(_ context.Context, providerID, sessionID, repoPath, requestID, prompt string) error {
+	f.sends = append(f.sends, fakeSendPromptCall{
+		providerID: providerID,
+		sessionID:  sessionID,
+		repoPath:   repoPath,
+		requestID:  requestID,
+		prompt:     prompt,
+	})
+	return f.err
 }
 func (f *fakeManager) Events() <-chan providers.Event { return f.events }
 func (f *fakeManager) StopAll(context.Context) error  { return nil }
@@ -477,6 +525,193 @@ func TestHandleProviderFinalDevelopmentWorkCompleteRunsHook(t *testing.T) {
 	}
 	if h.lastTrigger != config.HookTriggerDevelopmentWorkComplete {
 		t.Fatalf("expected development.work.complete trigger, got %q", h.lastTrigger)
+	}
+}
+
+func TestAutoReviewStartsOnDevelopmentWorkCompleteTag(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+	eng.autoReviewRunner = &fakeAutoReviewRunner{
+		base: "abc123",
+		ref:  "origin/main",
+		results: []autoReviewResult{
+			{Approved: true, Summary: "approved"},
+		},
+	}
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventFinal,
+		SessionID: s.ID,
+		Text:      "<DEVELOPMENT_WORK_COMPLETE>",
+	})
+
+	msgs := store.ActiveSession().Messages
+	joined := ""
+	for _, m := range msgs {
+		joined += m.Content + "\n"
+	}
+	if !strings.Contains(joined, "[[pilot-divider:Automatic Review]]") {
+		t.Fatalf("expected automatic review divider, got %q", joined)
+	}
+	if !strings.Contains(joined, "Cycle: 1/5") || !strings.Contains(joined, "State: Review approved") {
+		t.Fatalf("expected cycle/approved state headings, got %q", joined)
+	}
+}
+
+func TestAutoReviewCommentsPathResumesAgentAndWaitsForNextCompletion(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	repoPath := t.TempDir()
+	if err := store.AddRepoToActiveSession(repoPath, "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+	eng.autoReviewRunner = &fakeAutoReviewRunner{
+		base: "abc123",
+		ref:  "origin/main",
+		results: []autoReviewResult{
+			{Approved: false, Summary: "- fix x"},
+			{Approved: true, Summary: "approved"},
+		},
+	}
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventFinal,
+		SessionID: s.ID,
+		Text:      "<DEVELOPMENT_WORK_COMPLETE>",
+	})
+	if len(mgr.sends) != 1 {
+		t.Fatalf("expected one remediation prompt send, got %d", len(mgr.sends))
+	}
+	if !strings.Contains(mgr.sends[0].prompt, "- fix x") {
+		t.Fatalf("expected remediation prompt to contain review summary, got %q", mgr.sends[0].prompt)
+	}
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventFinal,
+		SessionID: s.ID,
+		Text:      "<DEVELOPMENT_WORK_COMPLETE>",
+	})
+	msgs := store.ActiveSession().Messages
+	joined := ""
+	for _, m := range msgs {
+		joined += m.Content + "\n"
+	}
+	if !strings.Contains(joined, "Cycle: 2/5") || !strings.Contains(joined, "State: Review approved") {
+		t.Fatalf("expected second cycle approval, got %q", joined)
+	}
+}
+
+func TestAutoReviewStopsAtFiveCyclesWithSystemMessage(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	repoPath := t.TempDir()
+	if err := store.AddRepoToActiveSession(repoPath, "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+	eng.autoReviewRunner = &fakeAutoReviewRunner{
+		base: "abc123",
+		ref:  "origin/main",
+		results: []autoReviewResult{
+			{Approved: false, Summary: "needs changes"},
+			{Approved: false, Summary: "needs changes"},
+			{Approved: false, Summary: "needs changes"},
+			{Approved: false, Summary: "needs changes"},
+			{Approved: false, Summary: "needs changes"},
+		},
+	}
+
+	for i := 0; i < 5; i++ {
+		eng.HandleProviderEvent(providers.Event{
+			Type:      providers.EventFinal,
+			SessionID: s.ID,
+			Text:      "<DEVELOPMENT_WORK_COMPLETE>",
+		})
+	}
+
+	if len(mgr.sends) != 4 {
+		t.Fatalf("expected remediation prompt on first four cycles, got %d", len(mgr.sends))
+	}
+	msgs := store.ActiveSession().Messages
+	joined := ""
+	for _, m := range msgs {
+		joined += m.Content + "\n"
+	}
+	if !strings.Contains(joined, "State: Max cycles reached (5)") {
+		t.Fatalf("expected max cycle terminal state, got %q", joined)
+	}
+}
+
+func TestAutoReviewReviewFailureRendersErrorState(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+	eng.autoReviewRunner = &fakeAutoReviewRunner{
+		baseErr: errors.New("no base"),
+	}
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventFinal,
+		SessionID: s.ID,
+		Text:      "<DEVELOPMENT_WORK_COMPLETE>",
+	})
+
+	msgs := store.ActiveSession().Messages
+	joined := ""
+	for _, m := range msgs {
+		joined += m.Content + "\n"
+	}
+	if !strings.Contains(joined, "State: Error") || !strings.Contains(joined, "no base") {
+		t.Fatalf("expected error state with reason, got %q", joined)
+	}
+}
+
+func TestAutoReviewMultipleTagsInOneMessageStartsSingleCycle(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	repoPath := t.TempDir()
+	if err := store.AddRepoToActiveSession(repoPath, "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	runner := &fakeAutoReviewRunner{
+		base: "abc123",
+		ref:  "origin/main",
+		results: []autoReviewResult{
+			{Approved: false, Summary: "needs changes"},
+		},
+	}
+	eng := NewEngine(store, mgr, config.Default())
+	eng.autoReviewRunner = runner
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventAgentMessage,
+		SessionID: s.ID,
+		Text:      "done [DEVELOPMENT_WORK_COMPLETE] and [<DEVELOPMENT_WORK_COMPLETE>]",
+	})
+
+	if runner.reviewCalls != 1 {
+		t.Fatalf("expected single review cycle start, got %d", runner.reviewCalls)
+	}
+	if len(mgr.sends) != 1 {
+		t.Fatalf("expected single remediation prompt, got %d", len(mgr.sends))
 	}
 }
 
