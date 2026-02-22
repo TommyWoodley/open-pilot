@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +17,8 @@ import (
 
 type fakeManager struct {
 	events chan providers.Event
-	sends []fakeSendPromptCall
-	err   error
+	sends  []fakeSendPromptCall
+	err    error
 }
 
 type fakeSendPromptCall struct {
@@ -36,13 +37,15 @@ type fakeHooks struct {
 }
 
 type fakeAutoReviewRunner struct {
-	base         string
-	ref          string
-	baseErr      error
-	results      []autoReviewResult
-	reviewErr    error
-	resolveCalls int
-	reviewCalls  int
+	base          string
+	ref           string
+	baseErr       error
+	results       []autoReviewResult
+	reviewErr     error
+	resolveCalls  int
+	reviewCalls   int
+	reviewStarted chan struct{}
+	reviewBlock   <-chan struct{}
 }
 
 func (f *fakeHooks) Run(_ context.Context, trigger config.HookTrigger, _ string, _ string, repoPath string, _ func(corehooks.ProgressUpdate)) corehooks.RunResult {
@@ -62,6 +65,15 @@ func (f *fakeAutoReviewRunner) ResolveBase(string) (string, string, error) {
 
 func (f *fakeAutoReviewRunner) Review(string, string) (autoReviewResult, error) {
 	f.reviewCalls++
+	if f.reviewStarted != nil {
+		select {
+		case f.reviewStarted <- struct{}{}:
+		default:
+		}
+	}
+	if f.reviewBlock != nil {
+		<-f.reviewBlock
+	}
 	if f.reviewErr != nil {
 		return autoReviewResult{}, f.reviewErr
 	}
@@ -71,6 +83,94 @@ func (f *fakeAutoReviewRunner) Review(string, string) (autoReviewResult, error) 
 	out := f.results[0]
 	f.results = f.results[1:]
 	return out, nil
+}
+
+func TestAutoReviewCompletionTagDoesNotBlockWhenAsyncEnabled(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+	releaseReview := make(chan struct{})
+	reviewStarted := make(chan struct{}, 1)
+	eng.autoReviewRunner = &fakeAutoReviewRunner{
+		base:          "abc123",
+		ref:           "origin/main",
+		results:       []autoReviewResult{{Approved: true, Summary: "approved"}},
+		reviewStarted: reviewStarted,
+		reviewBlock:   releaseReview,
+	}
+	eng.EnableAsyncAutoReview()
+
+	done := make(chan struct{})
+	go func() {
+		eng.HandleProviderEvent(providers.Event{
+			Type:      providers.EventFinal,
+			SessionID: s.ID,
+			Text:      "<DEVELOPMENT_WORK_COMPLETE>",
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("expected completion-tag handling to return immediately")
+	}
+
+	select {
+	case <-reviewStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("expected async review worker to start")
+	}
+
+	close(releaseReview)
+	select {
+	case ev := <-eng.AutoReviewEvents():
+		eng.HandleAutoReviewEvent(ev)
+	case <-time.After(time.Second):
+		t.Fatalf("expected async review event")
+	}
+
+	msgs := store.ActiveSession().Messages
+	joined := ""
+	for _, m := range msgs {
+		joined += m.Content + "\n"
+	}
+	if !strings.Contains(joined, "State: Review approved") {
+		t.Fatalf("expected async flow to complete review, got %q", joined)
+	}
+}
+
+func TestEmitAutoReviewEventLogsWarningWhenQueueFull(t *testing.T) {
+	store := session.NewStore()
+	store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	eng.EnableAsyncAutoReview()
+	eng.autoReviewEvents = make(chan AutoReviewEvent, 1)
+	eng.autoReviewEvents <- AutoReviewEvent{SessionID: "session-a", Cycle: 1}
+
+	var logs []string
+	eng.logf = func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+
+	eng.emitAutoReviewEvent(AutoReviewEvent{
+		SessionID: "session-a",
+		Cycle:     2,
+		BaseRef:   "origin/main",
+		Err:       errors.New("review failed"),
+	})
+
+	if len(logs) != 1 {
+		t.Fatalf("expected one warning log, got %d", len(logs))
+	}
+	if !containsAll(logs[0], "dropping auto-review event", "session=session-a", "cycle=2", "buffer=1/1", "base=origin/main", "err=review failed") {
+		t.Fatalf("expected structured warning log, got %q", logs[0])
+	}
 }
 
 func (f *fakeManager) SendPrompt(_ context.Context, providerID, sessionID, repoPath, requestID, prompt string) error {
@@ -607,6 +707,41 @@ func TestAutoReviewCommentsPathResumesAgentAndWaitsForNextCompletion(t *testing.
 	}
 	if !strings.Contains(joined, "Cycle: 2/5") || !strings.Contains(joined, "State: Review approved") {
 		t.Fatalf("expected second cycle approval, got %q", joined)
+	}
+}
+
+func TestAutoReviewDisplaysFullReviewOutput(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	repoPath := t.TempDir()
+	if err := store.AddRepoToActiveSession(repoPath, "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	longSummary := strings.Repeat("review-detail-", 80)
+	eng := NewEngine(store, mgr, config.Default())
+	eng.autoReviewRunner = &fakeAutoReviewRunner{
+		base: "abc123",
+		ref:  "origin/main",
+		results: []autoReviewResult{
+			{Approved: false, Summary: longSummary},
+		},
+	}
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventFinal,
+		SessionID: s.ID,
+		Text:      "<DEVELOPMENT_WORK_COMPLETE>",
+	})
+
+	msgs := store.ActiveSession().Messages
+	joined := ""
+	for _, m := range msgs {
+		joined += m.Content + "\n"
+	}
+	if !strings.Contains(joined, longSummary) {
+		t.Fatalf("expected full review output in transcript")
 	}
 }
 

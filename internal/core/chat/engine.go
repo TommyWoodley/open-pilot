@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -64,6 +65,14 @@ type HookEvent struct {
 	Result    corehooks.RunResult
 }
 
+type AutoReviewEvent struct {
+	SessionID string
+	Cycle     int
+	BaseRef   string
+	Result    autoReviewResult
+	Err       error
+}
+
 type hookProgressState struct {
 	progressID string
 	hookIDs    []string
@@ -71,22 +80,24 @@ type hookProgressState struct {
 }
 
 type Engine struct {
-	Store         *session.Store
-	Manager       ProviderManager
-	Hooks         corehooks.Service
-	Config        config.Config
-	ProviderState string
-	StatusText    string
-	pending       map[string]pendingRef
-	itemRefs      map[string]pendingRef
-	commandRuns   map[itemRef]commandRunState
-	exploreSeq    map[string]*exploreSequenceState
-	nextExploreID int
-	hookProgress  map[string]hookProgressState
-	hookEvents    chan HookEvent
-	asyncHookRuns bool
-	unknownSeen   map[string]struct{}
-	nowFn         func() time.Time
+	Store               *session.Store
+	Manager             ProviderManager
+	Hooks               corehooks.Service
+	Config              config.Config
+	ProviderState       string
+	StatusText          string
+	pending             map[string]pendingRef
+	itemRefs            map[string]pendingRef
+	commandRuns         map[itemRef]commandRunState
+	exploreSeq          map[string]*exploreSequenceState
+	nextExploreID       int
+	hookProgress        map[string]hookProgressState
+	hookEvents          chan HookEvent
+	autoReviewEvents    chan AutoReviewEvent
+	asyncHookRuns       bool
+	unknownSeen         map[string]struct{}
+	nowFn               func() time.Time
+	logf                func(format string, args ...any)
 	autoReviewBySession map[string]*autoReviewState
 	autoReviewRunner    autoReviewRunner
 	autoReviewMaxCycles int
@@ -94,20 +105,21 @@ type Engine struct {
 
 func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config) *Engine {
 	return &Engine{
-		Store:         store,
-		Manager:       manager,
-		Hooks:         corehooks.NewService(cfg.BuiltinHooks, cfg.BuiltinHooksLoadError, cfg.BuiltinSkillsDir),
-		Config:        cfg,
-		ProviderState: "disconnected",
-		StatusText:    "No agent connected",
-		pending:       make(map[string]pendingRef),
-		itemRefs:      make(map[string]pendingRef),
-		commandRuns:   make(map[itemRef]commandRunState),
-		exploreSeq:    make(map[string]*exploreSequenceState),
-		nextExploreID: 1,
-		hookProgress:  make(map[string]hookProgressState),
-		unknownSeen:   make(map[string]struct{}),
-		nowFn:         time.Now,
+		Store:               store,
+		Manager:             manager,
+		Hooks:               corehooks.NewService(cfg.BuiltinHooks, cfg.BuiltinHooksLoadError, cfg.BuiltinSkillsDir),
+		Config:              cfg,
+		ProviderState:       "disconnected",
+		StatusText:          "No agent connected",
+		pending:             make(map[string]pendingRef),
+		itemRefs:            make(map[string]pendingRef),
+		commandRuns:         make(map[itemRef]commandRunState),
+		exploreSeq:          make(map[string]*exploreSequenceState),
+		nextExploreID:       1,
+		hookProgress:        make(map[string]hookProgressState),
+		unknownSeen:         make(map[string]struct{}),
+		nowFn:               time.Now,
+		logf:                log.Printf,
 		autoReviewBySession: make(map[string]*autoReviewState),
 		autoReviewRunner:    newCLIAutoReviewRunner(),
 		autoReviewMaxCycles: 5,
@@ -119,6 +131,12 @@ func (e *Engine) EnableAsyncHooks() {
 		e.hookEvents = make(chan HookEvent, 256)
 	}
 	e.asyncHookRuns = true
+}
+
+func (e *Engine) EnableAsyncAutoReview() {
+	if e.autoReviewEvents == nil {
+		e.autoReviewEvents = make(chan AutoReviewEvent, 256)
+	}
 }
 
 func (e *Engine) ProcessInput(input string) {
@@ -658,9 +676,13 @@ func (e *Engine) handleAutoReviewCompletionTag(s *domain.Session) {
 		return
 	}
 	state := e.ensureAutoReviewState(s.ID)
+	if state.running {
+		return
+	}
 	if !state.active {
 		state.active = true
 		state.cycle = 0
+		state.running = false
 		state.waitingForCompletion = false
 		e.runAutoReviewCycle(s, state)
 		return
@@ -690,48 +712,32 @@ func (e *Engine) runAutoReviewCycle(s *domain.Session, st *autoReviewState) {
 		return
 	}
 	st.cycle++
+	st.running = true
 	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Starting", "")
 	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Computing base", "")
 	repoPath := e.repoPathForSession(s)
 	if strings.TrimSpace(repoPath) == "" {
+		st.running = false
 		e.failAutoReview(s.ID, st, "active repo is required")
 		return
 	}
-	baseSHA, baseRef, err := e.autoReviewRunner.ResolveBase(repoPath)
-	if err != nil {
-		e.failAutoReview(s.ID, st, err.Error())
-		return
-	}
 	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Running codex review", "")
-	reviewResult, err := e.autoReviewRunner.Review(repoPath, baseSHA)
-	if err != nil {
-		e.failAutoReview(s.ID, st, err.Error())
+	cycle := st.cycle
+	if e.autoReviewEvents == nil {
+		baseRef, reviewResult, err := e.executeAutoReview(repoPath)
+		e.applyAutoReviewCycleResult(s, st, cycle, baseRef, reviewResult, err)
 		return
 	}
-	if reviewResult.Approved {
-		e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Review approved", summarizeAutoReviewDetail(reviewResult.Summary))
-		e.finishAutoReview(st)
-		return
-	}
-	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Review requires changes", summarizeAutoReviewDetail(reviewResult.Summary))
-	if st.cycle >= e.autoReviewMaxCycles {
-		e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Max cycles reached (5)", "Manual follow-up required.")
-		e.finishAutoReview(st)
-		return
-	}
-	if e.Manager == nil {
-		e.failAutoReview(s.ID, st, "provider manager is unavailable")
-		return
-	}
-	prompt := buildAutoReviewPrompt(baseRef, reviewResult.Summary)
-	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Resuming agent to address feedback", "")
-	reqID := e.Store.NextID("req")
-	if err := e.Manager.SendPrompt(context.Background(), s.ProviderID, s.ID, repoPath, reqID, prompt); err != nil {
-		e.failAutoReview(s.ID, st, "failed to resume agent: "+err.Error())
-		return
-	}
-	st.waitingForCompletion = true
-	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Waiting for DEVELOPMENT_WORK_COMPLETE", "")
+	go func(sessionID string, cycleNum int, path string) {
+		baseRef, reviewResult, err := e.executeAutoReview(path)
+		e.emitAutoReviewEvent(AutoReviewEvent{
+			SessionID: sessionID,
+			Cycle:     cycleNum,
+			BaseRef:   baseRef,
+			Result:    reviewResult,
+			Err:       err,
+		})
+	}(s.ID, cycle, repoPath)
 }
 
 func (e *Engine) finishAutoReview(st *autoReviewState) {
@@ -739,10 +745,14 @@ func (e *Engine) finishAutoReview(st *autoReviewState) {
 		return
 	}
 	st.active = false
+	st.running = false
 	st.waitingForCompletion = false
 }
 
 func (e *Engine) failAutoReview(sessionID string, st *autoReviewState, reason string) {
+	if st != nil {
+		st.running = false
+	}
 	e.emitAutoReviewState(sessionID, st.cycle, e.autoReviewMaxCycles, "Error", summarizeAutoReviewDetail(reason))
 	e.finishAutoReview(st)
 }
@@ -774,6 +784,102 @@ func (e *Engine) repoPathForSession(s *domain.Session) string {
 		}
 	}
 	return ""
+}
+
+func (e *Engine) executeAutoReview(repoPath string) (string, autoReviewResult, error) {
+	baseSHA, baseRef, err := e.autoReviewRunner.ResolveBase(repoPath)
+	if err != nil {
+		return "", autoReviewResult{}, err
+	}
+	reviewResult, err := e.autoReviewRunner.Review(repoPath, baseSHA)
+	if err != nil {
+		return "", autoReviewResult{}, err
+	}
+	return baseRef, reviewResult, nil
+}
+
+func (e *Engine) applyAutoReviewCycleResult(s *domain.Session, st *autoReviewState, cycle int, baseRef string, reviewResult autoReviewResult, err error) {
+	if s == nil || st == nil {
+		return
+	}
+	st.running = false
+	if cycle != st.cycle {
+		return
+	}
+	if err != nil {
+		e.failAutoReview(s.ID, st, err.Error())
+		return
+	}
+	if reviewResult.Approved {
+		e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Review approved", summarizeAutoReviewDetail(reviewResult.Summary))
+		e.finishAutoReview(st)
+		return
+	}
+	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Review requires changes", summarizeAutoReviewDetail(reviewResult.Summary))
+	if st.cycle >= e.autoReviewMaxCycles {
+		e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Max cycles reached (5)", "Manual follow-up required.")
+		e.finishAutoReview(st)
+		return
+	}
+	if e.Manager == nil {
+		e.failAutoReview(s.ID, st, "provider manager is unavailable")
+		return
+	}
+	repoPath := e.repoPathForSession(s)
+	if strings.TrimSpace(repoPath) == "" {
+		e.failAutoReview(s.ID, st, "active repo is required")
+		return
+	}
+	prompt := buildAutoReviewPrompt(baseRef, reviewResult.Summary)
+	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Resuming agent to address feedback", "")
+	reqID := e.Store.NextID("req")
+	if err := e.Manager.SendPrompt(context.Background(), s.ProviderID, s.ID, repoPath, reqID, prompt); err != nil {
+		e.failAutoReview(s.ID, st, "failed to resume agent: "+err.Error())
+		return
+	}
+	st.waitingForCompletion = true
+	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Waiting for DEVELOPMENT_WORK_COMPLETE", "")
+}
+
+func (e *Engine) emitAutoReviewEvent(ev AutoReviewEvent) {
+	if e.autoReviewEvents == nil {
+		return
+	}
+	select {
+	case e.autoReviewEvents <- ev:
+	default:
+		if e.logf != nil {
+			if ev.Err != nil {
+				errMsg := strings.TrimSpace(ev.Err.Error())
+				if errMsg == "" {
+					errMsg = "(empty)"
+				}
+				const maxErrLen = 120
+				if len(errMsg) > maxErrLen {
+					errMsg = errMsg[:maxErrLen-3] + "..."
+				}
+				e.logf("dropping auto-review event: session=%s cycle=%d base=%s has_err=%t err=%s buffer=%d/%d", strings.TrimSpace(ev.SessionID), ev.Cycle, strings.TrimSpace(ev.BaseRef), true, errMsg, len(e.autoReviewEvents), cap(e.autoReviewEvents))
+				return
+			}
+			e.logf("dropping auto-review event: session=%s cycle=%d base=%s has_err=%t buffer=%d/%d", strings.TrimSpace(ev.SessionID), ev.Cycle, strings.TrimSpace(ev.BaseRef), false, len(e.autoReviewEvents), cap(e.autoReviewEvents))
+		}
+	}
+}
+
+func (e *Engine) AutoReviewEvents() <-chan AutoReviewEvent {
+	return e.autoReviewEvents
+}
+
+func (e *Engine) HandleAutoReviewEvent(ev AutoReviewEvent) {
+	s := e.Store.Sessions[ev.SessionID]
+	if s == nil {
+		return
+	}
+	st := e.ensureAutoReviewState(ev.SessionID)
+	if !st.active {
+		return
+	}
+	e.applyAutoReviewCycleResult(s, st, ev.Cycle, ev.BaseRef, ev.Result, ev.Err)
 }
 
 var developmentWorkCompleteOccurrenceRegex = regexp.MustCompile(`\[(?:<)?DEVELOPMENT_WORK_COMPLETE(?:>)?\]|<DEVELOPMENT_WORK_COMPLETE>`)

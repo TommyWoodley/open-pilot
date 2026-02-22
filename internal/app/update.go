@@ -92,6 +92,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.hookEvents != nil {
 			return m, waitHookEvent(m.hookEvents)
 		}
+	case autoReviewEventMsg:
+		m.handleAutoReviewEvent(msg.event)
+		if m.autoReviewEvents != nil {
+			return m, waitAutoReviewEvent(m.autoReviewEvents)
+		}
 	case generationTickMsg:
 		if m.ProviderState == "busy" {
 			m.GeneratingTick = (m.GeneratingTick + 1) % 3
