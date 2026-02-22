@@ -3,6 +3,7 @@ package chat
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -60,11 +61,31 @@ func (r *cliAutoReviewRunner) ResolveBase(repoPath string) (string, string, erro
 
 func (r *cliAutoReviewRunner) Review(repoPath string, baseSHA string) (autoReviewResult, error) {
 	revision := fmt.Sprintf("%s...HEAD", strings.TrimSpace(baseSHA))
+	args := []string{"review", revision}
+	commandLabel := "codex review " + revision
+	reviewable, err := r.hasReviewableDiff(repoPath, revision)
+	if err != nil {
+		return autoReviewResult{}, err
+	}
+	if !reviewable {
+		args = []string{"review"}
+		commandLabel = "codex review"
+		hasWorkingTree, err := r.hasReviewableWorkingTreeChanges(repoPath)
+		if err != nil {
+			return autoReviewResult{}, err
+		}
+		if !hasWorkingTree {
+			return autoReviewResult{
+				Approved: true,
+				Summary:  "No reviewable changes found.",
+			}, nil
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	if r.logf != nil {
-		r.logf("auto-review run repo=%s command=%q", repoPath, "codex review "+revision)
+		r.logf("auto-review run repo=%s command=%q", repoPath, commandLabel)
 	}
-	out, err := r.runCmd(ctx, repoPath, "codex", "review", revision)
+	out, err := r.runCmd(ctx, repoPath, "codex", args...)
 	cancel()
 	if r.logf != nil {
 		scanner := bufio.NewScanner(strings.NewReader(out))
@@ -86,6 +107,66 @@ func (r *cliAutoReviewRunner) Review(repoPath string, baseSHA string) (autoRevie
 	}, nil
 }
 
+func (r *cliAutoReviewRunner) hasReviewableDiff(repoPath, revision string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	_, err := r.runCmd(ctx, repoPath, "git", "diff", "--quiet", revision)
+	cancel()
+	if err == nil {
+		return false, nil
+	}
+	exitCode, ok := commandExitCode(err)
+	if ok && exitCode == 1 {
+		return true, nil
+	}
+	return false, err
+}
+
+func (r *cliAutoReviewRunner) hasReviewableWorkingTreeChanges(repoPath string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	trackedOut, err := r.runCmd(ctx, repoPath, "git", "diff", "--name-only", "HEAD", "--", ".", ":(exclude).gitignore")
+	cancel()
+	if err != nil {
+		return false, err
+	}
+	if outputHasReviewablePaths(trackedOut) {
+		return true, nil
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), 20*time.Second)
+	untrackedOut, err := r.runCmd(ctx, repoPath, "git", "ls-files", "--others", "--exclude-standard", "--", ".")
+	cancel()
+	if err != nil {
+		return false, err
+	}
+	return outputHasReviewablePaths(untrackedOut), nil
+}
+
+func outputHasReviewablePaths(output string) bool {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if filepath.Base(line) == ".gitignore" {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func commandExitCode(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	var exitCoder interface{ ExitCode() int }
+	if errors.As(err, &exitCoder) {
+		return exitCoder.ExitCode(), true
+	}
+	return 0, false
+}
+
 func runCommandCapture(ctx context.Context, dir, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
@@ -100,7 +181,11 @@ func autoReviewApprovedFromOutput(output string) bool {
 	}
 	return strings.Contains(lower, "approved") ||
 		strings.Contains(lower, "no comments") ||
-		strings.Contains(lower, "no issues found")
+		strings.Contains(lower, "no issues found") ||
+		strings.Contains(lower, "no code changes") ||
+		strings.Contains(lower, "nothing to flag") ||
+		strings.Contains(lower, "nothing to review") ||
+		strings.Contains(lower, "no reviewable changes")
 }
 
 func buildAutoReviewPrompt(baseRef, reviewSummary string) string {

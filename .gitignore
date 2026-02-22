@@ -5,3 +5,5 @@ bin/
 # Editor / OS artifacts
 *.swp
 .DS_Store
+
+codex-debug.log

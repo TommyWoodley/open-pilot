@@ -662,6 +662,12 @@ func TestAutoReviewStartsOnDevelopmentWorkCompleteTag(t *testing.T) {
 	if !strings.Contains(joined, "Cycle: 1/5") || !strings.Contains(joined, "State: Review approved") {
 		t.Fatalf("expected cycle/approved state headings, got %q", joined)
 	}
+	if strings.Contains(joined, "State: Waiting for DEVELOPMENT_WORK_COMPLETE") {
+		t.Fatalf("expected immediate auto-review termination after approval, got %q", joined)
+	}
+	if len(mgr.sends) != 0 {
+		t.Fatalf("did not expect remediation prompt send on approved review, got %d", len(mgr.sends))
+	}
 }
 
 func TestAutoReviewCommentsPathResumesAgentAndWaitsForNextCompletion(t *testing.T) {
