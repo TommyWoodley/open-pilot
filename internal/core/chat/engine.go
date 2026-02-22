@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -96,6 +97,7 @@ type Engine struct {
 	asyncHookRuns       bool
 	unknownSeen         map[string]struct{}
 	nowFn               func() time.Time
+	logf                func(format string, args ...any)
 	autoReviewBySession map[string]*autoReviewState
 	autoReviewRunner    autoReviewRunner
 	autoReviewMaxCycles int
@@ -117,6 +119,7 @@ func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config)
 		hookProgress:        make(map[string]hookProgressState),
 		unknownSeen:         make(map[string]struct{}),
 		nowFn:               time.Now,
+		logf:                log.Printf,
 		autoReviewBySession: make(map[string]*autoReviewState),
 		autoReviewRunner:    newCLIAutoReviewRunner(),
 		autoReviewMaxCycles: 5,
@@ -845,6 +848,9 @@ func (e *Engine) emitAutoReviewEvent(ev AutoReviewEvent) {
 	select {
 	case e.autoReviewEvents <- ev:
 	default:
+		if e.logf != nil {
+			e.logf("dropping auto-review event: session=%s cycle=%d base=%s has_err=%t buffer=%d/%d", strings.TrimSpace(ev.SessionID), ev.Cycle, strings.TrimSpace(ev.BaseRef), ev.Err != nil, len(e.autoReviewEvents), cap(e.autoReviewEvents))
+		}
 	}
 }
 

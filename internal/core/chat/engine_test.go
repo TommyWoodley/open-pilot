@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -141,6 +142,34 @@ func TestAutoReviewCompletionTagDoesNotBlockWhenAsyncEnabled(t *testing.T) {
 	}
 	if !strings.Contains(joined, "State: Review approved") {
 		t.Fatalf("expected async flow to complete review, got %q", joined)
+	}
+}
+
+func TestEmitAutoReviewEventLogsWarningWhenQueueFull(t *testing.T) {
+	store := session.NewStore()
+	store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+	eng.EnableAsyncAutoReview()
+	eng.autoReviewEvents = make(chan AutoReviewEvent, 1)
+	eng.autoReviewEvents <- AutoReviewEvent{SessionID: "session-a", Cycle: 1}
+
+	var logs []string
+	eng.logf = func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+
+	eng.emitAutoReviewEvent(AutoReviewEvent{
+		SessionID: "session-a",
+		Cycle:     2,
+		BaseRef:   "origin/main",
+		Err:       errors.New("review failed"),
+	})
+
+	if len(logs) != 1 {
+		t.Fatalf("expected one warning log, got %d", len(logs))
+	}
+	if !containsAll(logs[0], "dropping auto-review event", "session=session-a", "cycle=2", "buffer=1/1", "base=origin/main") {
+		t.Fatalf("expected structured warning log, got %q", logs[0])
 	}
 }
 
