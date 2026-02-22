@@ -364,8 +364,8 @@ func TestBrainstormingEndTagRendersClosingDivider(t *testing.T) {
 	if strings.Contains(joined, "<BRAINSTORMING_END>") {
 		t.Fatalf("expected end tag to be transformed, got %q", joined)
 	}
-	if !strings.Contains(joined, "[[pilot-divider:]]") {
-		t.Fatalf("expected closing divider token, got %q", joined)
+	if strings.Contains(joined, "[[pilot-divider:]]") {
+		t.Fatalf("did not expect closing divider token for end tag, got %q", joined)
 	}
 	if !strings.Contains(joined, "[agent] Design approved") {
 		t.Fatalf("expected assistant content to remain visible, got %q", joined)
@@ -400,8 +400,8 @@ func TestSkillEndTagRendersClosingDivider(t *testing.T) {
 	if strings.Contains(joined, "<TEST_DRIVEN_DEVELOPMENT_END>") {
 		t.Fatalf("expected skill end tag to be transformed, got %q", joined)
 	}
-	if !strings.Contains(joined, "[[pilot-divider:]]") {
-		t.Fatalf("expected closing divider token, got %q", joined)
+	if strings.Contains(joined, "[[pilot-divider:]]") {
+		t.Fatalf("did not expect closing divider token for end tag, got %q", joined)
 	}
 	if !strings.Contains(joined, "[agent] All tests green") {
 		t.Fatalf("expected assistant content to remain visible, got %q", joined)

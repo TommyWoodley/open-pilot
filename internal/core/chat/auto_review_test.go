@@ -175,8 +175,8 @@ func TestReviewUsesWorkingTreeWhenNoCommittedDiff(t *testing.T) {
 				}
 			}
 			if name == "codex" {
-				if len(args) != 1 || args[0] != "review" {
-					t.Fatalf("expected codex working-tree review args, got %#v", args)
+				if len(args) != 2 || args[0] != "review" || args[1] != "--uncommitted" {
+					t.Fatalf("expected codex working-tree review args with --uncommitted, got %#v", args)
 				}
 				return "no issues found", nil
 			}
@@ -192,7 +192,7 @@ func TestReviewUsesWorkingTreeWhenNoCommittedDiff(t *testing.T) {
 	if !out.Approved {
 		t.Fatalf("expected approved result, got %#v", out)
 	}
-	if !containsAll(strings.Join(commands, "\n"), "git diff --quiet abc123...HEAD", "codex review") {
+	if !containsAll(strings.Join(commands, "\n"), "git diff --quiet abc123...HEAD", "codex review --uncommitted") {
 		t.Fatalf("missing expected commands: %v", commands)
 	}
 }
