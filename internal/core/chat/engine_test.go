@@ -168,7 +168,7 @@ func TestEmitAutoReviewEventLogsWarningWhenQueueFull(t *testing.T) {
 	if len(logs) != 1 {
 		t.Fatalf("expected one warning log, got %d", len(logs))
 	}
-	if !containsAll(logs[0], "dropping auto-review event", "session=session-a", "cycle=2", "buffer=1/1", "base=origin/main") {
+	if !containsAll(logs[0], "dropping auto-review event", "session=session-a", "cycle=2", "buffer=1/1", "base=origin/main", "err=review failed") {
 		t.Fatalf("expected structured warning log, got %q", logs[0])
 	}
 }

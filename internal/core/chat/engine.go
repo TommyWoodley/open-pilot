@@ -849,7 +849,19 @@ func (e *Engine) emitAutoReviewEvent(ev AutoReviewEvent) {
 	case e.autoReviewEvents <- ev:
 	default:
 		if e.logf != nil {
-			e.logf("dropping auto-review event: session=%s cycle=%d base=%s has_err=%t buffer=%d/%d", strings.TrimSpace(ev.SessionID), ev.Cycle, strings.TrimSpace(ev.BaseRef), ev.Err != nil, len(e.autoReviewEvents), cap(e.autoReviewEvents))
+			if ev.Err != nil {
+				errMsg := strings.TrimSpace(ev.Err.Error())
+				if errMsg == "" {
+					errMsg = "(empty)"
+				}
+				const maxErrLen = 120
+				if len(errMsg) > maxErrLen {
+					errMsg = errMsg[:maxErrLen-3] + "..."
+				}
+				e.logf("dropping auto-review event: session=%s cycle=%d base=%s has_err=%t err=%s buffer=%d/%d", strings.TrimSpace(ev.SessionID), ev.Cycle, strings.TrimSpace(ev.BaseRef), true, errMsg, len(e.autoReviewEvents), cap(e.autoReviewEvents))
+				return
+			}
+			e.logf("dropping auto-review event: session=%s cycle=%d base=%s has_err=%t buffer=%d/%d", strings.TrimSpace(ev.SessionID), ev.Cycle, strings.TrimSpace(ev.BaseRef), false, len(e.autoReviewEvents), cap(e.autoReviewEvents))
 		}
 	}
 }
