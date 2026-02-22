@@ -49,10 +49,6 @@ func (m *Model) runCommand(cmd Command) {
 	m.consumeStoreWarning()
 }
 
-func helpText() string {
-	return corecommand.HelpText()
-}
-
 func (m *Model) handleProviderEvent(ev providers.Event) {
 	if ev.SessionID == "" {
 		ev.SessionID = m.store.ActiveSessionID
@@ -144,11 +140,6 @@ func (m *Model) commandSuggestions(input string) []string {
 	})
 }
 
-func (m *Model) addSystemMessage(text string) {
-	m.chat.AddSystemMessage(text)
-	m.StatusText = m.chat.StatusText
-}
-
 func (m *Model) createSession(name string) *domain.Session {
 	s := m.store.CreateSession(name)
 	m.ActiveSessionID = m.store.ActiveSessionID
@@ -165,28 +156,6 @@ func (m *Model) useSession(id string) bool {
 	return ok
 }
 
-func (m *Model) addRepoToActiveSession(path, label string) error {
-	err := m.store.AddRepoToActiveSession(path, label)
-	if err == nil {
-		repo := m.store.ActiveRepo()
-		if repo != nil {
-			m.StatusText = "Added repo " + repo.Path
-		}
-	}
-	return err
-}
-
-func (m *Model) setActiveRepo(repoID string) error {
-	err := m.store.SetActiveRepo(repoID)
-	if err == nil {
-		repo := m.store.ActiveRepo()
-		if repo != nil {
-			m.StatusText = "Using repo " + repo.Label
-		}
-	}
-	return err
-}
-
 func (m *Model) activeRepo() *domain.RepoRef {
 	return m.store.ActiveRepo()
 }
@@ -199,23 +168,8 @@ func (m *Model) activeSession() *domain.Session {
 	return m.store.ActiveSession()
 }
 
-func (m *Model) appendUserMessage(providerID, repoID, text string) {
-	m.store.AppendUserMessage(providerID, repoID, text)
-}
-
-func (m *Model) appendAssistantStreaming(providerID, repoID, requestID string) {
-	idx := m.store.AppendAssistantStreaming(providerID, repoID)
-	if requestID != "" && idx >= 0 {
-		m.pending[requestID] = idx
-	}
-}
-
 func (m *Model) listSessionsText() string {
 	return m.store.ListSessionsText()
-}
-
-func (m *Model) listReposText() string {
-	return m.store.ListReposText()
 }
 
 func (m *Model) consumeStoreWarning() {

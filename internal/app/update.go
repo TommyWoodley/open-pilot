@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -11,7 +13,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, m.keys.Quit):
-			m.shutdownProviders(nil)
+			m.shutdownProviders(context.TODO())
 			return m, tea.Quit
 		case key.Matches(msg, m.keys.ScrollUp):
 			m.TranscriptScroll++

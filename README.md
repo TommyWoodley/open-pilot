@@ -27,6 +27,7 @@ Run the same checks used in CI:
 ```bash
 go test ./...
 go vet ./...
+golangci-lint run ./...
 ```
 
 ## GitHub Actions CI
@@ -35,8 +36,7 @@ CI runs on pushes to `master` and pull requests targeting `master`.
 Checks executed:
 - `go test ./...`
 - `go vet ./...`
-
-Linting can be added later after current lint debt is cleaned up.
+- `golangci-lint run ./...`
 
 ## Slash commands
 

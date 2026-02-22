@@ -445,9 +445,7 @@ func (s *Store) ListReposText() string {
 
 func (s *Store) SessionIDs() []string {
 	ids := make([]string, 0, len(s.SessionOrder))
-	for _, id := range s.SessionOrder {
-		ids = append(ids, id)
-	}
+	ids = append(ids, s.SessionOrder...)
 	return ids
 }
 
