@@ -238,6 +238,8 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 	turnFailedMsg := ""
 	lastStderrMsg := ""
 	stderrLines := make([]string, 0, 8)
+	var stdoutScanErr error
+	var stderrScanErr error
 	var streamedText strings.Builder
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -306,6 +308,12 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 			}
 			mu.Unlock()
 		}
+		if err := s.Err(); err != nil {
+			mu.Lock()
+			stdoutScanErr = err
+			mu.Unlock()
+			a.logf("stdout", "scan_error=%v", err)
+		}
 	}()
 	go func() {
 		defer wg.Done()
@@ -328,15 +336,32 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 			lastStderrMsg = msg
 			mu.Unlock()
 		}
+		if err := s.Err(); err != nil {
+			mu.Lock()
+			stderrScanErr = err
+			mu.Unlock()
+			a.logf("stderr", "scan_error=%v", err)
+		}
 	}()
 
+	// Drain both pipes before waiting so stdout/stderr lines are not truncated.
+	// The os/exec contract for StdoutPipe/StderrPipe requires reads to complete
+	// before Wait closes the pipes.
+	wg.Wait()
 	waitErr := cmd.Wait()
 	if waitErr != nil {
 		a.logf("exit", "request=%s err=%v", prompt.ID, waitErr)
 	} else {
 		a.logf("exit", "request=%s ok", prompt.ID)
 	}
-	wg.Wait()
+	if waitErr == nil {
+		if stdoutScanErr != nil {
+			return result, fmt.Errorf("scan codex stdout: %w", stdoutScanErr)
+		}
+		if stderrScanErr != nil {
+			return result, fmt.Errorf("scan codex stderr: %w", stderrScanErr)
+		}
+	}
 
 	readErr := error(nil)
 	if outputPath != "" {
