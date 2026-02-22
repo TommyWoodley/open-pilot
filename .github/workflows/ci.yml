@@ -2,11 +2,9 @@ name: CI
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: ["master"]
   pull_request:
-
-permissions:
-  contents: read
+    branches: ["master"]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -37,14 +35,15 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version-file: go.mod
+          cache: true
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@v6
         with:
-          version: v2.6
+          version: v1.64.8
