@@ -409,3 +409,27 @@ func TestSkillTagsRenderAsDividerSection(t *testing.T) {
 		t.Fatalf("expected assistant skill text to remain visible, got %q", joined)
 	}
 }
+
+func TestDevelopmentWorkCompleteDividerRendersDoubleLine(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	m.Width = 100
+	m.Height = 24
+	s.Messages = append(s.Messages, domain.Message{
+		ID:      "msg-dev-work-complete-divider",
+		Role:    domain.RoleAssistant,
+		Content: "[DEVELOPMENT_WORK_COMPLETE]\nDone",
+	})
+
+	lines := m.displayTranscriptLines()
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "Development Work Complete") {
+		t.Fatalf("expected divider title to be visible, got %q", joined)
+	}
+	if !strings.Contains(joined, "═") {
+		t.Fatalf("expected development-work-complete divider to use double line characters, got %q", joined)
+	}
+}

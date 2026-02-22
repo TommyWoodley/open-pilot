@@ -41,6 +41,7 @@ go build ./cmd/open-pilot
   - `session.started` (runs on `/session new` and can be rerun with `/hooks run`)
   - `repo.selected` (runs on `/session add-repo`, `/session repo use`, and `/session use` when an active repo exists)
   - `provider.codex.selected` (runs on `/provider use codex` and on `/session new` when codex is default)
+  - `development.work.complete` (runs each time assistant output includes `[DEVELOPMENT_WORK_COMPLETE]`, `[<DEVELOPMENT_WORK_COMPLETE>]`, or `<DEVELOPMENT_WORK_COMPLETE>`)
 - `install-builtin-skills-on-codex-select` pulls superpowers skills from GitHub (`TommyWoodley/pilot-superpowers@main`) and installs them into `~/.codex/skills`.
 
 ## Wrapper protocol

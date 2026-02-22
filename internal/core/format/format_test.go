@@ -408,6 +408,51 @@ func TestSkillEndTagRendersClosingDivider(t *testing.T) {
 	}
 }
 
+func TestDevelopmentWorkCompleteTagRendersDividerTitle(t *testing.T) {
+	msg := domain.Message{
+		Role:    domain.RoleAssistant,
+		Content: "[DEVELOPMENT_WORK_COMPLETE]\nDone",
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{})
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "[DEVELOPMENT_WORK_COMPLETE]") {
+		t.Fatalf("expected tag to be transformed, got %q", joined)
+	}
+	if !strings.Contains(joined, "[[pilot-divider:Development Work Complete]]") {
+		t.Fatalf("expected development-work-complete divider title, got %q", joined)
+	}
+}
+
+func TestDevelopmentWorkCompleteAngleBracketTagRendersDividerTitle(t *testing.T) {
+	msg := domain.Message{
+		Role:    domain.RoleAssistant,
+		Content: "[<DEVELOPMENT_WORK_COMPLETE>]\nDone",
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{})
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "[<DEVELOPMENT_WORK_COMPLETE>]") {
+		t.Fatalf("expected bracketed angle tag to be transformed, got %q", joined)
+	}
+	if !strings.Contains(joined, "[[pilot-divider:Development Work Complete]]") {
+		t.Fatalf("expected development-work-complete divider title, got %q", joined)
+	}
+}
+
+func TestDevelopmentWorkCompleteRawAngleTagRendersDividerTitle(t *testing.T) {
+	msg := domain.Message{
+		Role:    domain.RoleAssistant,
+		Content: "<DEVELOPMENT_WORK_COMPLETE>\nDone",
+	}
+	lines := BuildTranscriptLines([]domain.Message{msg}, Styles{})
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "<DEVELOPMENT_WORK_COMPLETE>") {
+		t.Fatalf("expected raw angle tag to be transformed, got %q", joined)
+	}
+	if !strings.Contains(joined, "[[pilot-divider:Development Work Complete]]") {
+		t.Fatalf("expected development-work-complete divider title, got %q", joined)
+	}
+}
+
 func TestSkillTagExplanationLinesDoNotUseAgentMetaStyle(t *testing.T) {
 	msg := domain.Message{
 		Role: domain.RoleAssistant,

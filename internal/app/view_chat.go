@@ -110,8 +110,12 @@ func renderPilotDividerLine(title string, width int) string {
 	if width <= 0 {
 		return ""
 	}
+	lineChar := "─"
+	if strings.EqualFold(strings.TrimSpace(title), "Development Work Complete") {
+		lineChar = "═"
+	}
 	if strings.TrimSpace(title) == "" {
-		return ui.HookDividerLineStyle.Render(strings.Repeat("─", width))
+		return ui.HookDividerLineStyle.Render(strings.Repeat(lineChar, width))
 	}
 	label := " " + strings.TrimSpace(title) + " "
 	labelWidth := lipgloss.Width(label)
@@ -120,9 +124,9 @@ func renderPilotDividerLine(title string, width int) string {
 	}
 	left := (width - labelWidth) / 2
 	right := width - labelWidth - left
-	return ui.HookDividerLineStyle.Render(strings.Repeat("─", left)) +
+	return ui.HookDividerLineStyle.Render(strings.Repeat(lineChar, left)) +
 		ui.HookDividerTitleStyle.Render(label) +
-		ui.HookDividerLineStyle.Render(strings.Repeat("─", right))
+		ui.HookDividerLineStyle.Render(strings.Repeat(lineChar, right))
 }
 
 func truncateVisible(s string, width int) string {

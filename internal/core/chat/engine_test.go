@@ -413,6 +413,73 @@ func TestHandleProviderAgentMessageSameItemIDDifferentRequestDoesNotOverwrite(t 
 	}
 }
 
+func TestHandleProviderAgentMessageDevelopmentWorkCompleteRunsHooksForEachTag(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	cfg := config.Default()
+	cfg.BuiltinHooks = config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{
+				ID:       "dev-work-complete",
+				Triggers: []config.HookTrigger{config.HookTriggerDevelopmentWorkComplete},
+				Execute:  []string{"echo ok"},
+				Timeout:  time.Second,
+			},
+		},
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
+	h := &fakeHooks{result: corehooks.RunResult{Passed: true}}
+	eng.Hooks = h
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventAgentMessage,
+		SessionID: s.ID,
+		Text:      "done [DEVELOPMENT_WORK_COMPLETE] and again [<DEVELOPMENT_WORK_COMPLETE>]",
+	})
+
+	if h.calls != 2 {
+		t.Fatalf("expected two hook runs for two tags, got %d", h.calls)
+	}
+	if h.lastTrigger != config.HookTriggerDevelopmentWorkComplete {
+		t.Fatalf("expected development.work.complete trigger, got %q", h.lastTrigger)
+	}
+}
+
+func TestHandleProviderFinalDevelopmentWorkCompleteRunsHook(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	idx := store.AppendAssistantStreaming("codex", "repo-1")
+	cfg := config.Default()
+	cfg.BuiltinHooks = config.HookCatalog{
+		Hooks: []config.HookDefinition{
+			{
+				ID:       "dev-work-complete",
+				Triggers: []config.HookTrigger{config.HookTriggerDevelopmentWorkComplete},
+				Execute:  []string{"echo ok"},
+				Timeout:  time.Second,
+			},
+		},
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, cfg)
+	h := &fakeHooks{result: corehooks.RunResult{Passed: true}}
+	eng.Hooks = h
+	eng.pending["req-1"] = pendingRef{SessionID: s.ID, Index: idx}
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventFinal,
+		SessionID: s.ID,
+		RequestID: "req-1",
+		Text:      "all done <DEVELOPMENT_WORK_COMPLETE>",
+	})
+
+	if h.calls != 1 {
+		t.Fatalf("expected one hook run for final tag, got %d", h.calls)
+	}
+	if h.lastTrigger != config.HookTriggerDevelopmentWorkComplete {
+		t.Fatalf("expected development.work.complete trigger, got %q", h.lastTrigger)
+	}
+}
+
 func TestHandleProviderCommandExecutionUsesExploredSummaryForDiscoveryCommands(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")

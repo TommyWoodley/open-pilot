@@ -16,6 +16,7 @@ type HookTrigger string
 const HookTriggerSessionStarted HookTrigger = "session.started"
 const HookTriggerRepoSelected HookTrigger = "repo.selected"
 const HookTriggerProviderCodexSelected HookTrigger = "provider.codex.selected"
+const HookTriggerDevelopmentWorkComplete HookTrigger = "development.work.complete"
 
 type HookDefinition struct {
 	Version     int
@@ -108,7 +109,8 @@ func validateHook(hook HookDefinition) error {
 	for _, trigger := range hook.Triggers {
 		if trigger != HookTriggerSessionStarted &&
 			trigger != HookTriggerRepoSelected &&
-			trigger != HookTriggerProviderCodexSelected {
+			trigger != HookTriggerProviderCodexSelected &&
+			trigger != HookTriggerDevelopmentWorkComplete {
 			return fmt.Errorf("unsupported trigger %q", trigger)
 		}
 	}
