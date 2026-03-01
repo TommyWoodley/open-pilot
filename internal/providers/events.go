@@ -13,6 +13,7 @@ const (
 	EventReasoning        = "reasoning"
 	EventCommandExecution = "command_execution"
 	EventAgentMessage     = "agent_message"
+	EventToolCall         = "tool_call"
 	EventTurnUsage        = "turn.usage"
 )
 
@@ -70,7 +71,7 @@ func parseWrapperEvent(line []byte) (Event, error) {
 
 func isKnownEventType(eventType string) bool {
 	switch eventType {
-	case EventReady, EventChunk, EventFinal, EventError, EventStatus, EventExited, EventReasoning, EventCommandExecution, EventAgentMessage, EventTurnUsage:
+	case EventReady, EventChunk, EventFinal, EventError, EventStatus, EventExited, EventReasoning, EventCommandExecution, EventAgentMessage, EventToolCall, EventTurnUsage:
 		return true
 	default:
 		return false

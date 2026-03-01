@@ -329,6 +329,7 @@ func TestCodexAdapterIgnoresToolCallItemCompleted(t *testing.T) {
 
 	timer := time.NewTimer(providerEventWaitTimeout)
 	defer timer.Stop()
+	sawToolCall := false
 	for {
 		select {
 		case <-timer.C:
@@ -340,7 +341,16 @@ func TestCodexAdapterIgnoresToolCallItemCompleted(t *testing.T) {
 			if ev.Type == EventUnknown {
 				t.Fatalf("expected tool_call item.completed to be handled, got unknown event: %#v", ev)
 			}
+			if ev.Type == EventToolCall {
+				sawToolCall = true
+				if ev.Text != "patched files" {
+					t.Fatalf("expected tool_call text, got %#v", ev)
+				}
+			}
 			if ev.Type == EventFinal {
+				if !sawToolCall {
+					t.Fatalf("expected tool_call event before final")
+				}
 				return
 			}
 			if ev.Type == EventError {

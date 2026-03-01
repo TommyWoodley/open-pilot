@@ -755,6 +755,74 @@ func TestHandleProviderReasoningUpsertsByItemID(t *testing.T) {
 	}
 }
 
+func TestHandleProviderToolCallRendersConciseLine(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventToolCall,
+		SessionID: s.ID,
+		ItemID:    "item-tc",
+		Text:      "patched files",
+	})
+
+	msgs := store.ActiveSession().Messages
+	if len(msgs) != 1 {
+		t.Fatalf("expected one tool-call message, got %d", len(msgs))
+	}
+	if msgs[0].Content != "[tool-call] patched files" {
+		t.Fatalf("unexpected tool-call content: %q", msgs[0].Content)
+	}
+}
+
+func TestHandleProviderToolCallEmptyText(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventToolCall,
+		SessionID: s.ID,
+		ItemID:    "item-tc",
+	})
+
+	msgs := store.ActiveSession().Messages
+	if len(msgs) != 1 {
+		t.Fatalf("expected one tool-call message, got %d", len(msgs))
+	}
+	if msgs[0].Content != "[tool-call]" {
+		t.Fatalf("unexpected tool-call content: %q", msgs[0].Content)
+	}
+}
+
+func TestHandleProviderToolCallUpsertsByItemID(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventToolCall,
+		SessionID: s.ID,
+		ItemID:    "item-tc",
+		Text:      "apply_patch",
+	})
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventToolCall,
+		SessionID: s.ID,
+		ItemID:    "item-tc",
+		Text:      "patched files",
+	})
+
+	msgs := store.ActiveSession().Messages
+	if len(msgs) != 1 {
+		t.Fatalf("expected one upserted tool-call message, got %d", len(msgs))
+	}
+	if msgs[0].Content != "[tool-call] patched files" {
+		t.Fatalf("expected latest tool-call text, got %q", msgs[0].Content)
+	}
+}
+
 func TestHandleProviderAgentMessageClearsPendingPlaceholderAndUsesItemID(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")

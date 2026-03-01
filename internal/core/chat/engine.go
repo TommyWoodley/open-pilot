@@ -660,6 +660,16 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 			e.Store.AddAssistantMessage(s.ID, text)
 		}
 		e.runDevelopmentWorkCompleteHooksForContent(s, ev.Text)
+	case providers.EventToolCall:
+		content := "[tool-call]"
+		if text := strings.TrimSpace(ev.Text); text != "" {
+			content = "[tool-call] " + text
+		}
+		if strings.TrimSpace(ev.ItemID) != "" {
+			e.upsertItemMessage(s.ID, ev.RequestID, ev.ItemID, content)
+		} else {
+			e.Store.AddAssistantMessage(s.ID, content)
+		}
 	case providers.EventCommandExecution:
 		e.handleCommandExecutionEvent(s.ID, ev)
 	case providers.EventTurnUsage:
