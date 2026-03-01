@@ -349,7 +349,7 @@ func (e *Engine) startManualAutoReview() {
 		e.AddSystemMessage("Add/select a repo first: /session add-repo <abs-path>")
 		return
 	}
-	e.handleAutoReviewCompletionTag(s)
+	e.handleAutoReviewCompletionTag(s, true)
 }
 
 func (e *Engine) runHooks(s *domain.Session, trigger config.HookTrigger, repoPath string) {
@@ -678,14 +678,17 @@ func (e *Engine) runDevelopmentWorkCompleteHooksForContent(s *domain.Session, co
 	for i := 0; i < count; i++ {
 		e.runHooks(s, config.HookTriggerDevelopmentWorkComplete, repoPath)
 	}
-	e.handleAutoReviewCompletionTag(s)
+	e.handleAutoReviewCompletionTag(s, false)
 }
 
-func (e *Engine) handleAutoReviewCompletionTag(s *domain.Session) {
+func (e *Engine) handleAutoReviewCompletionTag(s *domain.Session, allowWhenDisabled bool) {
 	if s == nil {
 		return
 	}
 	if s.ProviderID != "codex" {
+		return
+	}
+	if !allowWhenDisabled && !s.AutoReviewLoopEnabled {
 		return
 	}
 	repoPath := e.repoPathForSession(s)

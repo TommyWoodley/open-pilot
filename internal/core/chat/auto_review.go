@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -122,8 +123,12 @@ func (r *cliAutoReviewRunner) Review(repoPath string, baseSHA string, onOutput f
 	if trimmed == "" {
 		trimmed = "Review requires changes."
 	}
+	approved := autoReviewApprovedFromOutput(trimmed)
+	if parsedApproved, ok := autoReviewApprovedFromStructuredOutput(trimmed); ok {
+		approved = parsedApproved
+	}
 	return autoReviewResult{
-		Approved: autoReviewApprovedFromOutput(trimmed),
+		Approved: approved,
 		Summary:  trimmed,
 	}, nil
 }
@@ -271,6 +276,60 @@ func autoReviewApprovedFromOutput(output string) bool {
 		strings.Contains(lower, "nothing to flag") ||
 		strings.Contains(lower, "nothing to review") ||
 		strings.Contains(lower, "no reviewable changes")
+}
+
+func autoReviewApprovedFromStructuredOutput(output string) (bool, bool) {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return false, false
+	}
+	lower := strings.ToLower(trimmed)
+	startTag := "<open_pilot_review>"
+	endTag := "</open_pilot_review>"
+	start := strings.Index(lower, startTag)
+	if start < 0 {
+		return false, false
+	}
+	endRel := strings.Index(lower[start+len(startTag):], endTag)
+	if endRel < 0 {
+		return false, false
+	}
+	block := trimmed[start+len(startTag) : start+len(startTag)+endRel]
+	status := ""
+	actionsCount := -1
+	for _, rawLine := range strings.Split(block, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		lowerLine := strings.ToLower(line)
+		if strings.HasPrefix(lowerLine, "status:") {
+			status = strings.TrimSpace(strings.ToLower(line[len("status:"):]))
+			continue
+		}
+		if strings.HasPrefix(lowerLine, "actions_count:") {
+			value := strings.TrimSpace(line[len("actions_count:"):])
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 0 {
+				return false, false
+			}
+			actionsCount = n
+		}
+	}
+	if actionsCount == 0 {
+		return true, true
+	}
+	if actionsCount > 0 {
+		return false, true
+	}
+	switch status {
+	case "approved":
+		return true, true
+	case "changes_required":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 func buildAutoReviewPrompt(baseRef, reviewSummary string) string {

@@ -95,6 +95,7 @@ func TestAutoReviewStreamsProgressLinesWhenAsyncEnabled(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
 	s.ProviderID = "codex"
+	s.AutoReviewLoopEnabled = true
 	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
 		t.Fatalf("add repo: %v", err)
 	}
@@ -168,6 +169,7 @@ func TestAutoReviewCompletionTagDoesNotBlockWhenAsyncEnabled(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
 	s.ProviderID = "codex"
+	s.AutoReviewLoopEnabled = true
 	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
 		t.Fatalf("add repo: %v", err)
 	}
@@ -228,6 +230,7 @@ func TestAutoReviewDeliversCycleResultWhenProgressFloodsQueue(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
 	s.ProviderID = "codex"
+	s.AutoReviewLoopEnabled = true
 	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
 		t.Fatalf("add repo: %v", err)
 	}
@@ -796,6 +799,7 @@ func TestAutoReviewStartsOnDevelopmentWorkCompleteTag(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
 	s.ProviderID = "codex"
+	s.AutoReviewLoopEnabled = true
 	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
 		t.Fatalf("add repo: %v", err)
 	}
@@ -834,10 +838,45 @@ func TestAutoReviewStartsOnDevelopmentWorkCompleteTag(t *testing.T) {
 	}
 }
 
+func TestAutoReviewDoesNotStartWhenSessionOptionDisabled(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	s.AutoReviewLoopEnabled = false
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+	eng.autoReviewRunner = &fakeAutoReviewRunner{
+		base: "abc123",
+		ref:  "origin/main",
+		results: []autoReviewResult{
+			{Approved: true, Summary: "approved"},
+		},
+	}
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventFinal,
+		SessionID: s.ID,
+		Text:      "<DEVELOPMENT_WORK_COMPLETE>",
+	})
+
+	msgs := store.ActiveSession().Messages
+	joined := ""
+	for _, m := range msgs {
+		joined += m.Content + "\n"
+	}
+	if strings.Contains(joined, "[[pilot-divider:Automatic Review]]") {
+		t.Fatalf("expected no automatic review transcript when disabled, got %q", joined)
+	}
+}
+
 func TestAutoReviewCommentsPathResumesAgentAndWaitsForNextCompletion(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
 	s.ProviderID = "codex"
+	s.AutoReviewLoopEnabled = true
 	repoPath := t.TempDir()
 	if err := store.AddRepoToActiveSession(repoPath, "repo"); err != nil {
 		t.Fatalf("add repo: %v", err)
@@ -884,6 +923,7 @@ func TestAutoReviewDisplaysFullReviewOutput(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
 	s.ProviderID = "codex"
+	s.AutoReviewLoopEnabled = true
 	repoPath := t.TempDir()
 	if err := store.AddRepoToActiveSession(repoPath, "repo"); err != nil {
 		t.Fatalf("add repo: %v", err)
@@ -919,6 +959,7 @@ func TestAutoReviewStopsAtFiveCyclesWithSystemMessage(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
 	s.ProviderID = "codex"
+	s.AutoReviewLoopEnabled = true
 	repoPath := t.TempDir()
 	if err := store.AddRepoToActiveSession(repoPath, "repo"); err != nil {
 		t.Fatalf("add repo: %v", err)
@@ -962,6 +1003,7 @@ func TestAutoReviewReviewFailureRendersErrorState(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
 	s.ProviderID = "codex"
+	s.AutoReviewLoopEnabled = true
 	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
 		t.Fatalf("add repo: %v", err)
 	}
@@ -991,6 +1033,7 @@ func TestAutoReviewMultipleTagsInOneMessageStartsSingleCycle(t *testing.T) {
 	store := session.NewStore()
 	s := store.CreateSession("demo")
 	s.ProviderID = "codex"
+	s.AutoReviewLoopEnabled = true
 	repoPath := t.TempDir()
 	if err := store.AddRepoToActiveSession(repoPath, "repo"); err != nil {
 		t.Fatalf("add repo: %v", err)

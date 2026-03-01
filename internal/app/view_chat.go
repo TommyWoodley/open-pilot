@@ -10,6 +10,26 @@ import (
 )
 
 func (m Model) renderTranscript() string {
+	if m.SessionSetupActive {
+		selectedDisabled := " "
+		selectedEnabled := " "
+		if m.SessionSetupAutoReviewEnabled {
+			selectedEnabled = "x"
+		} else {
+			selectedDisabled = "x"
+		}
+		text := strings.Join([]string{
+			"Session setup",
+			"",
+			"Auto-review loop:",
+			"[" + selectedDisabled + "] Disabled (default)",
+			"[" + selectedEnabled + "] Enabled",
+			"",
+			"Use ←/→ (or ↑/↓) to choose, Enter to confirm, Esc to keep default.",
+		}, "\n")
+		return ui.BodyStyle.Width(max(m.Width-2, 50)).Render(text)
+	}
+
 	allLines := m.displayTranscriptLines()
 	if len(allLines) == 0 {
 		text := "No messages yet. Start with /session new <name>"

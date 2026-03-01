@@ -32,6 +32,8 @@ func (m Model) processEnter() Model {
 
 	cmd, isCommand, err := ParseCommand(input)
 	if isCommand && err == nil && cmd.Kind == corecommand.KindSessionNew {
+		m.SessionSetupActive = true
+		m.SessionSetupAutoReviewEnabled = false
 		m.Input = "/session add-repo "
 	}
 	m.consumeStoreWarning()
@@ -44,9 +46,25 @@ func (m *Model) runCommand(cmd Command) {
 	m.StatusText = m.chat.StatusText
 	m.ActiveSessionID = m.store.ActiveSessionID
 	if cmd.Kind == corecommand.KindSessionNew {
+		m.SessionSetupActive = true
+		m.SessionSetupAutoReviewEnabled = false
 		m.Input = "/session add-repo "
 	}
 	m.consumeStoreWarning()
+}
+
+func (m *Model) applySessionSetupSelection() {
+	s := m.activeSession()
+	if s != nil {
+		_ = m.store.SetAutoReviewLoopEnabledForActiveSession(m.SessionSetupAutoReviewEnabled)
+		if s.AutoReviewLoopEnabled {
+			m.StatusText = "Session option saved: auto-review loop enabled"
+		} else {
+			m.StatusText = "Session option saved: auto-review loop disabled"
+		}
+	}
+	m.SessionSetupActive = false
+	m.Input = "/session add-repo "
 }
 
 func (m *Model) handleProviderEvent(ev providers.Event) {

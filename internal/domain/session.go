@@ -11,14 +11,15 @@ type RepoRef struct {
 
 // Session tracks provider context and message history.
 type Session struct {
-	ID               string
-	Name             string
-	ProviderID       string
-	Repos            []RepoRef
-	ActiveRepoID     string
-	HooksBlocked     bool
-	HooksBlockReason string
-	LastHookRunAt    time.Time
-	Messages         []Message
-	CreatedAt        time.Time
+	ID                    string
+	Name                  string
+	ProviderID            string
+	AutoReviewLoopEnabled bool
+	Repos                 []RepoRef
+	ActiveRepoID          string
+	HooksBlocked          bool
+	HooksBlockReason      string
+	LastHookRunAt         time.Time
+	Messages              []Message
+	CreatedAt             time.Time
 }

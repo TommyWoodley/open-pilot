@@ -15,6 +15,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Quit):
 			m.shutdownProviders(context.TODO())
 			return m, tea.Quit
+		case m.SessionSetupActive:
+			switch msg.Type {
+			case tea.KeyLeft, tea.KeyUp:
+				m.SessionSetupAutoReviewEnabled = false
+				return m, nil
+			case tea.KeyRight, tea.KeyDown:
+				m.SessionSetupAutoReviewEnabled = true
+				return m, nil
+			case tea.KeyEnter:
+				m.applySessionSetupSelection()
+				return m, nil
+			case tea.KeyEsc:
+				m.SessionSetupAutoReviewEnabled = false
+				m.applySessionSetupSelection()
+				return m, nil
+			default:
+				return m, nil
+			}
 		case key.Matches(msg, m.keys.ScrollUp):
 			m.TranscriptScroll++
 			m.AutoFollowTranscript = false
