@@ -290,7 +290,7 @@ func TestCodexAdapterFailureFallsBackToStderrMessage(t *testing.T) {
 func TestCodexAdapterEmitsUnknownEventsAndLogsPayload(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "provider-debug.log")
 	t.Setenv("OPEN_PILOT_PROVIDER_DEBUG_LOG", logPath)
-	env := setupFakeCodex(t, "unknown_event", "thread-unknown", "hello")
+	env := setupFakeCodex(t, "unknown_raw_event", "thread-unknown", "hello")
 
 	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
 	handle, events := startHandle(t, adapter, env.repoDir)
@@ -300,10 +300,10 @@ func TestCodexAdapterEmitsUnknownEventsAndLogsPayload(t *testing.T) {
 	}
 
 	unknown := waitEventType(t, events, EventUnknown)
-	if unknown.RawType != "item.completed" {
-		t.Fatalf("expected unknown raw type item.completed, got %q", unknown.RawType)
+	if unknown.RawType != "tool.preview" {
+		t.Fatalf("expected unknown raw type tool.preview, got %q", unknown.RawType)
 	}
-	if !strings.Contains(unknown.RawJSON, `"item":{"type":"tool_call"`) {
+	if !strings.Contains(unknown.RawJSON, `"type":"tool.preview"`) {
 		t.Fatalf("expected raw json payload, got %q", unknown.RawJSON)
 	}
 	_ = waitEventType(t, events, EventFinal)
@@ -312,8 +312,41 @@ func TestCodexAdapterEmitsUnknownEventsAndLogsPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read provider debug log failed: %v", err)
 	}
-	if !strings.Contains(string(data), `"raw_type":"item.completed"`) {
+	if !strings.Contains(string(data), `"raw_type":"tool.preview"`) {
 		t.Fatalf("expected unknown event diagnostic in log, got %q", string(data))
+	}
+}
+
+func TestCodexAdapterIgnoresToolCallItemCompleted(t *testing.T) {
+	env := setupFakeCodex(t, "unknown_event", "thread-unknown", "hello")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-tool-call", SessionID: "sess-1", RepoPath: env.repoDir, Text: "hello"}); err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	timer := time.NewTimer(providerEventWaitTimeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			t.Fatalf("timed out waiting for final event")
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatalf("event channel closed before final")
+			}
+			if ev.Type == EventUnknown {
+				t.Fatalf("expected tool_call item.completed to be handled, got unknown event: %#v", ev)
+			}
+			if ev.Type == EventFinal {
+				return
+			}
+			if ev.Type == EventError {
+				t.Fatalf("unexpected provider error: %#v", ev)
+			}
+		}
 	}
 }
 
@@ -450,6 +483,13 @@ fi
 if [ "$mode" = "unknown_event" ]; then
   printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
   printf '{"type":"item.completed","item":{"type":"tool_call","text":"patched files"}}\n'
+  printf '{"type":"response.output_text.delta","delta":"%s"}\n' "$last_message"
+  printf '%s' "$last_message" > "$out_file"
+  exit 0
+fi
+if [ "$mode" = "unknown_raw_event" ]; then
+  printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
+  printf '{"type":"tool.preview","text":"still unknown"}\n'
   printf '{"type":"response.output_text.delta","delta":"%s"}\n' "$last_message"
   printf '%s' "$last_message" > "$out_file"
   exit 0

@@ -173,6 +173,27 @@ func TestNormalizeCodexEventAgentMessage(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexEventUnknownItemSubtypeIsHandledSilently(t *testing.T) {
+	t.Parallel()
+
+	ev := codexJSONEvent{Type: "item.completed"}
+	raw := map[string]any{
+		"type": "item.completed",
+		"item": map[string]any{
+			"id":   "item-4",
+			"type": "tool_call",
+			"text": "patched files",
+		},
+	}
+	got, ok := normalizeCodexEvent(ev, raw)
+	if !ok {
+		t.Fatalf("expected unknown item subtype to be marked handled")
+	}
+	if got.Type != "" {
+		t.Fatalf("expected no normalized event for internal-only item subtype, got %#v", got)
+	}
+}
+
 func TestNormalizeCodexEventTurnUsage(t *testing.T) {
 	t.Parallel()
 
