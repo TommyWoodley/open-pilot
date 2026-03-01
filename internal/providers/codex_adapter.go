@@ -667,9 +667,7 @@ func normalizeCodexEvent(ev codexJSONEvent, raw map[string]any) (Event, bool) {
 				Text:     firstNonEmptyString(item, "text", "name", "tool_name"),
 			}, true
 		default:
-			// Some item lifecycle entries are internal-only and should not
-			// be surfaced as unknown provider events.
-			return Event{}, true
+			return Event{}, false
 		}
 	default:
 		return Event{}, false

@@ -237,6 +237,24 @@ func TestNormalizeCodexEventToolCallTextFallback(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexEventUnknownItemSubtypeIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	ev := codexJSONEvent{Type: "item.completed"}
+	raw := map[string]any{
+		"type": "item.completed",
+		"item": map[string]any{
+			"id":   "item-unknown",
+			"type": "totally_new_item_type",
+			"text": "new payload",
+		},
+	}
+	got, ok := normalizeCodexEvent(ev, raw)
+	if ok {
+		t.Fatalf("expected unknown item subtype to return ok=false, got %#v", got)
+	}
+}
+
 func TestNormalizeCodexEventTurnUsage(t *testing.T) {
 	t.Parallel()
 
