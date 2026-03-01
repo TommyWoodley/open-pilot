@@ -58,6 +58,40 @@ func TestSQLitePersisterSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSQLitePersisterSaveLoadRoundTripPreservesCodexThreadID(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "sessions.db")
+	p, err := NewSQLitePersister(path)
+	if err != nil {
+		t.Fatalf("new persister: %v", err)
+	}
+
+	in := session.Snapshot{
+		NextID: 1,
+		Sessions: []session.SessionSnapshot{{
+			ID:            "session-1",
+			Name:          "demo",
+			ProviderID:    "codex",
+			CodexThreadID: "thread-abc",
+			CreatedAt:     100,
+		}},
+	}
+	if err := p.Save(in); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	out, err := p.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(out.Sessions))
+	}
+	if out.Sessions[0].CodexThreadID != "thread-abc" {
+		t.Fatalf("expected codex thread id to round trip, got %q", out.Sessions[0].CodexThreadID)
+	}
+}
+
 func TestSQLitePersisterLoadEmpty(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "sessions.db")

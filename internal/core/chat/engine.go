@@ -18,14 +18,19 @@ import (
 )
 
 type ProviderManager interface {
-	SendPrompt(ctx context.Context, providerID, sessionID, repoPath, requestID, prompt string) error
+	SendPrompt(ctx context.Context, providerID, sessionID, repoPath, requestID, prompt string, opts providers.SendOptions) error
 	Events() <-chan providers.Event
 	StopAll(ctx context.Context) error
 }
 
 type pendingRef struct {
-	SessionID string
-	Index     int
+	SessionID       string
+	Index           int
+	ProviderID      string
+	RepoPath        string
+	Prompt          string
+	ResumeAttempted bool
+	ReplayRetried   bool
 }
 
 type itemRef struct {
@@ -50,6 +55,7 @@ type exploreSequenceState struct {
 }
 
 const hooksRunningReason = "running"
+const replayResumeWarning = "Resumed via replay; prior chat was resent to restore context."
 
 type HookEventType string
 
@@ -102,6 +108,7 @@ type Engine struct {
 	autoReviewBySession map[string]*autoReviewState
 	autoReviewRunner    autoReviewRunner
 	autoReviewMaxCycles int
+	replayWarned        map[string]bool
 }
 
 func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config) *Engine {
@@ -124,6 +131,7 @@ func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config)
 		autoReviewBySession: make(map[string]*autoReviewState),
 		autoReviewRunner:    newCLIAutoReviewRunner(),
 		autoReviewMaxCycles: 5,
+		replayWarned:        make(map[string]bool),
 	}
 }
 
@@ -203,12 +211,25 @@ func (e *Engine) SendPrompt(input string) {
 	requestID := e.Store.NextID("req")
 	e.Store.AppendUserMessage(s.ProviderID, repo.ID, input)
 	idx := e.Store.AppendAssistantStreaming(s.ProviderID, repo.ID)
-	e.pending[requestID] = pendingRef{SessionID: s.ID, Index: idx}
+	resumeThreadID := strings.TrimSpace(s.CodexThreadID)
+	e.pending[requestID] = pendingRef{
+		SessionID:       s.ID,
+		Index:           idx,
+		ProviderID:      s.ProviderID,
+		RepoPath:        repo.Path,
+		Prompt:          input,
+		ResumeAttempted: s.ProviderID == "codex" && resumeThreadID != "",
+	}
 	e.ProviderState = "busy"
 	e.StatusText = "Sending prompt..."
 
-	err := e.Manager.SendPrompt(context.Background(), s.ProviderID, s.ID, repo.Path, requestID, input)
+	err := e.Manager.SendPrompt(context.Background(), s.ProviderID, s.ID, repo.Path, requestID, input, providers.SendOptions{
+		ProviderThreadID: resumeThreadID,
+	})
 	if err != nil {
+		if e.retryPendingWithReplay(s, requestID) {
+			return
+		}
 		e.ProviderState = "error"
 		e.AddSystemMessage("Provider send failed: " + err.Error())
 	}
@@ -568,6 +589,9 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 		e.StatusText = ev.Message
 		return
 	}
+	if strings.TrimSpace(ev.ProviderThreadID) != "" && (ev.Provider == "codex" || s.ProviderID == "codex") {
+		s.CodexThreadID = strings.TrimSpace(ev.ProviderThreadID)
+	}
 
 	switch ev.Type {
 	case providers.EventReady:
@@ -602,6 +626,9 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 		e.ProviderState = "ready"
 		e.StatusText = "Response complete"
 	case providers.EventError:
+		if e.retryWithReplayIfNeeded(s, ev) {
+			return
+		}
 		e.ProviderState = "error"
 		errText := ev.Message
 		if errText == "" && ev.Err != nil {
@@ -912,12 +939,68 @@ func (e *Engine) applyAutoReviewCycleResult(s *domain.Session, st *autoReviewSta
 	prompt := buildAutoReviewPrompt(baseRef, reviewResult.Summary)
 	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Resuming agent to address feedback", "")
 	reqID := e.Store.NextID("req")
-	if err := e.Manager.SendPrompt(context.Background(), s.ProviderID, s.ID, repoPath, reqID, prompt); err != nil {
+	if err := e.Manager.SendPrompt(context.Background(), s.ProviderID, s.ID, repoPath, reqID, prompt, providers.SendOptions{}); err != nil {
 		e.failAutoReview(s.ID, st, "failed to resume agent: "+err.Error())
 		return
 	}
 	st.waitingForCompletion = true
 	e.emitAutoReviewState(s.ID, st.cycle, e.autoReviewMaxCycles, "Waiting for DEVELOPMENT_WORK_COMPLETE", "")
+}
+
+func (e *Engine) retryWithReplayIfNeeded(s *domain.Session, ev providers.Event) bool {
+	if s == nil || strings.TrimSpace(ev.RequestID) == "" {
+		return false
+	}
+	return e.retryPendingWithReplay(s, ev.RequestID)
+}
+
+func (e *Engine) retryPendingWithReplay(s *domain.Session, requestID string) bool {
+	if s == nil || strings.TrimSpace(requestID) == "" {
+		return false
+	}
+	ref, ok := e.pending[requestID]
+	if !ok || !ref.ResumeAttempted || ref.ReplayRetried || ref.ProviderID != "codex" {
+		return false
+	}
+	replayPrompt := e.buildReplayPrompt(s)
+	if strings.TrimSpace(replayPrompt) == "" {
+		return false
+	}
+	ref.ReplayRetried = true
+	ref.ResumeAttempted = false
+	e.pending[requestID] = ref
+	s.CodexThreadID = ""
+	if !e.replayWarned[s.ID] {
+		e.Store.AddSessionSystemMessage(s.ID, replayResumeWarning)
+		e.replayWarned[s.ID] = true
+	}
+	if err := e.Manager.SendPrompt(context.Background(), ref.ProviderID, ref.SessionID, ref.RepoPath, requestID, replayPrompt, providers.SendOptions{DisableResume: true}); err != nil {
+		return false
+	}
+	e.ProviderState = "busy"
+	e.StatusText = "Resuming via replay..."
+	return true
+}
+
+func (e *Engine) buildReplayPrompt(s *domain.Session) string {
+	if s == nil {
+		return ""
+	}
+	lines := make([]string, 0, len(s.Messages)+3)
+	lines = append(lines, "Prior conversation transcript:")
+	for _, m := range s.Messages {
+		if m.Streaming {
+			continue
+		}
+		role := strings.TrimSpace(m.Role)
+		content := strings.TrimSpace(m.Content)
+		if role == "" || content == "" {
+			continue
+		}
+		lines = append(lines, role+": "+content)
+	}
+	lines = append(lines, "Continue from this context.")
+	return strings.Join(lines, "\n")
 }
 
 func (e *Engine) emitAutoReviewEvent(ev AutoReviewEvent) {

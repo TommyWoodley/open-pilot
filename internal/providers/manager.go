@@ -13,9 +13,14 @@ import (
 // Manager coordinates provider adapters and emits a unified event stream.
 type Manager interface {
 	SetProviderConfig(providerID string, cfg config.ProviderConfig)
-	SendPrompt(ctx context.Context, providerID, sessionID, repoPath, requestID, prompt string) error
+	SendPrompt(ctx context.Context, providerID, sessionID, repoPath, requestID, prompt string, opts SendOptions) error
 	Events() <-chan Event
 	StopAll(ctx context.Context) error
+}
+
+type SendOptions struct {
+	ProviderThreadID string
+	DisableResume    bool
 }
 
 type service struct {
@@ -49,7 +54,7 @@ func (s *service) SetProviderConfig(providerID string, cfg config.ProviderConfig
 	delete(s.adapters, providerID)
 }
 
-func (s *service) SendPrompt(ctx context.Context, providerID, sessionID, repoPath, requestID, prompt string) error {
+func (s *service) SendPrompt(ctx context.Context, providerID, sessionID, repoPath, requestID, prompt string, opts SendOptions) error {
 	if providerID == "" || sessionID == "" || repoPath == "" {
 		return errors.New("provider, session, and repo path are required")
 	}
@@ -67,7 +72,12 @@ func (s *service) SendPrompt(ctx context.Context, providerID, sessionID, repoPat
 	handle, ok := s.handles[key]
 	var eventStream <-chan Event
 	if !ok {
-		handle, err = adapter.Start(ctx, StartRequest{SessionID: sessionID, Provider: providerID, RepoPath: repoPath})
+		handle, err = adapter.Start(ctx, StartRequest{
+			SessionID:        sessionID,
+			Provider:         providerID,
+			RepoPath:         repoPath,
+			ProviderThreadID: opts.ProviderThreadID,
+		})
 		if err != nil {
 			s.mu.Unlock()
 			return err
@@ -88,7 +98,14 @@ func (s *service) SendPrompt(ctx context.Context, providerID, sessionID, repoPat
 	}
 	s.mu.Unlock()
 
-	return adapter.Send(ctx, handle, PromptRequest{ID: requestID, SessionID: sessionID, Text: prompt, RepoPath: repoPath})
+	return adapter.Send(ctx, handle, PromptRequest{
+		ID:               requestID,
+		SessionID:        sessionID,
+		Text:             prompt,
+		RepoPath:         repoPath,
+		ProviderThreadID: opts.ProviderThreadID,
+		DisableResume:    opts.DisableResume,
+	})
 }
 
 func (s *service) Events() <-chan Event {
