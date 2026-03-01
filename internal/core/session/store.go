@@ -19,13 +19,14 @@ type Snapshot struct {
 }
 
 type SessionSnapshot struct {
-	ID           string
-	Name         string
-	ProviderID   string
-	ActiveRepoID string
-	CreatedAt    int64
-	Repos        []domain.RepoRef
-	Messages     []MessageSnapshot
+	ID                    string
+	Name                  string
+	ProviderID            string
+	AutoReviewLoopEnabled bool
+	ActiveRepoID          string
+	CreatedAt             int64
+	Repos                 []domain.RepoRef
+	Messages              []MessageSnapshot
 }
 
 type MessageSnapshot struct {
@@ -233,6 +234,16 @@ func (s *Store) AddRepoToActiveSession(path, label string) error {
 	if active.ActiveRepoID == "" {
 		active.ActiveRepoID = id
 	}
+	s.saveIfEnabled()
+	return nil
+}
+
+func (s *Store) SetAutoReviewLoopEnabledForActiveSession(enabled bool) error {
+	active := s.ActiveSession()
+	if active == nil {
+		return fmt.Errorf("no active session")
+	}
+	active.AutoReviewLoopEnabled = enabled
 	s.saveIfEnabled()
 	return nil
 }
@@ -508,13 +519,14 @@ func (s *Store) snapshot() Snapshot {
 			continue
 		}
 		item := SessionSnapshot{
-			ID:           ss.ID,
-			Name:         ss.Name,
-			ProviderID:   ss.ProviderID,
-			ActiveRepoID: ss.ActiveRepoID,
-			CreatedAt:    ss.CreatedAt.Unix(),
-			Repos:        append([]domain.RepoRef{}, ss.Repos...),
-			Messages:     make([]MessageSnapshot, 0, len(ss.Messages)),
+			ID:                    ss.ID,
+			Name:                  ss.Name,
+			ProviderID:            ss.ProviderID,
+			AutoReviewLoopEnabled: ss.AutoReviewLoopEnabled,
+			ActiveRepoID:          ss.ActiveRepoID,
+			CreatedAt:             ss.CreatedAt.Unix(),
+			Repos:                 append([]domain.RepoRef{}, ss.Repos...),
+			Messages:              make([]MessageSnapshot, 0, len(ss.Messages)),
 		}
 		for _, m := range ss.Messages {
 			item.Messages = append(item.Messages, MessageSnapshot{
@@ -540,13 +552,14 @@ func (s *Store) applySnapshot(snap Snapshot) {
 
 	for _, ss := range snap.Sessions {
 		sessionItem := &domain.Session{
-			ID:           ss.ID,
-			Name:         ss.Name,
-			ProviderID:   ss.ProviderID,
-			ActiveRepoID: ss.ActiveRepoID,
-			CreatedAt:    time.Unix(ss.CreatedAt, 0),
-			Repos:        append([]domain.RepoRef{}, ss.Repos...),
-			Messages:     make([]domain.Message, 0, len(ss.Messages)),
+			ID:                    ss.ID,
+			Name:                  ss.Name,
+			ProviderID:            ss.ProviderID,
+			AutoReviewLoopEnabled: ss.AutoReviewLoopEnabled,
+			ActiveRepoID:          ss.ActiveRepoID,
+			CreatedAt:             time.Unix(ss.CreatedAt, 0),
+			Repos:                 append([]domain.RepoRef{}, ss.Repos...),
+			Messages:              make([]domain.Message, 0, len(ss.Messages)),
 		}
 		for _, msg := range ss.Messages {
 			sessionItem.Messages = append(sessionItem.Messages, domain.Message{

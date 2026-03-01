@@ -43,6 +43,9 @@ type Model struct {
 
 	TranscriptScroll     int
 	AutoFollowTranscript bool
+
+	SessionSetupActive            bool
+	SessionSetupAutoReviewEnabled bool
 }
 
 // NewModel returns the initial application state.

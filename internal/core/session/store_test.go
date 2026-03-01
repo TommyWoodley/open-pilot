@@ -237,6 +237,33 @@ func TestLoadFromPersisterNormalizesStreamingMessages(t *testing.T) {
 	}
 }
 
+func TestSnapshotRoundTripPreservesAutoReviewLoopOption(t *testing.T) {
+	s := NewStore()
+	created := s.CreateSession("demo")
+	if created == nil {
+		t.Fatalf("expected session create")
+	}
+	created.AutoReviewLoopEnabled = true
+
+	snap := s.snapshot()
+	if len(snap.Sessions) != 1 {
+		t.Fatalf("expected one snapshot session, got %d", len(snap.Sessions))
+	}
+	if !snap.Sessions[0].AutoReviewLoopEnabled {
+		t.Fatalf("expected snapshot to preserve auto-review loop option")
+	}
+
+	restored := NewStore()
+	restored.applySnapshot(snap)
+	session := restored.Sessions[created.ID]
+	if session == nil {
+		t.Fatalf("expected restored session")
+	}
+	if !session.AutoReviewLoopEnabled {
+		t.Fatalf("expected restored session to preserve auto-review loop option")
+	}
+}
+
 func TestSaveErrorSetsWarningButKeepsState(t *testing.T) {
 	fp := &fakePersister{saveErr: errors.New("disk full")}
 	s := NewStoreWithPersister(fp)

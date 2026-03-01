@@ -126,6 +126,57 @@ func TestReviewTreatsNonApprovedOutputAsComments(t *testing.T) {
 	}
 }
 
+func TestReviewTreatsStructuredNoActionOutputAsApproved(t *testing.T) {
+	r := &cliAutoReviewRunner{
+		runCmd: func(_ context.Context, _ string, name string, args ...string) (string, error) {
+			if name == "git" {
+				if len(args) >= 2 && args[0] == "diff" && args[1] == "--quiet" {
+					return "", &fakeExitError{code: 1}
+				}
+				return "", nil
+			}
+			if name == "codex" {
+				return "<OPEN_PILOT_REVIEW>\nstatus: changes_required\nactions_count: 0\n</OPEN_PILOT_REVIEW>\nNo actionable findings.", nil
+			}
+			t.Fatalf("unexpected command: %s %#v", name, args)
+			return "", nil
+		},
+	}
+
+	out, err := r.Review("/tmp/repo", "abc123", nil)
+	if err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if !out.Approved {
+		t.Fatalf("expected approved result for zero-action structured output")
+	}
+}
+
+func TestReviewUsesRevisionWithoutPrompt(t *testing.T) {
+	r := &cliAutoReviewRunner{
+		runCmd: func(_ context.Context, _ string, name string, args ...string) (string, error) {
+			if name == "git" {
+				if len(args) >= 2 && args[0] == "diff" && args[1] == "--quiet" {
+					return "", &fakeExitError{code: 1}
+				}
+				return "", nil
+			}
+			if name == "codex" {
+				if len(args) != 2 || args[0] != "review" || args[1] != "abc123...HEAD" {
+					t.Fatalf("unexpected codex args: %#v", args)
+				}
+				return "Approved: no comments", nil
+			}
+			t.Fatalf("unexpected command: %s %#v", name, args)
+			return "", nil
+		},
+	}
+
+	if _, err := r.Review("/tmp/repo", "abc123", nil); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+}
+
 func TestReviewWritesDebugLog(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "codex-debug.log")
 	t.Setenv("OPEN_PILOT_CODEX_DEBUG_LOG", logPath)
@@ -213,7 +264,7 @@ func TestReviewUsesWorkingTreeWhenNoCommittedDiff(t *testing.T) {
 			}
 			if name == "codex" {
 				if len(args) != 2 || args[0] != "review" || args[1] != "--uncommitted" {
-					t.Fatalf("expected codex working-tree review args with --uncommitted, got %#v", args)
+					t.Fatalf("expected codex working-tree review args with --uncommitted and no prompt, got %#v", args)
 				}
 				return "no issues found", nil
 			}
