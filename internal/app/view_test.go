@@ -218,6 +218,31 @@ func TestStatusBusyDoesNotShowDots(t *testing.T) {
 	}
 }
 
+func TestSessionBarShowsFunctionKeysAndPerSessionState(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s1 := m.createSession("alpha")
+	s2 := m.createSession("beta")
+	m.ActiveSessionID = s2.ID
+	s1.Messages = append(s1.Messages, domain.Message{
+		ID:        "msg-streaming",
+		Role:      domain.RoleAssistant,
+		Content:   "working",
+		Streaming: true,
+	})
+	m.Width = 120
+
+	bar := m.renderSessionBar()
+
+	checks := []string{"F1", "alpha", "in-progress", "F2", "beta", "ready"}
+	for _, expected := range checks {
+		if !strings.Contains(bar, expected) {
+			t.Fatalf("expected session bar to contain %q, got %q", expected, bar)
+		}
+	}
+}
+
 func TestUnknownProviderEventAppearsInTranscript(t *testing.T) {
 	t.Parallel()
 

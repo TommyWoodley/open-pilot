@@ -114,7 +114,7 @@ func HelpText() string {
 		"/review",
 		"/hooks run",
 		"/help",
-		"Navigation: Up/Down/PgUp/PgDn/Home/End scroll transcript",
+		"Navigation: F1-F12 switch sessions, Up/Down/PgUp/PgDn/Home/End scroll transcript",
 	}, "\n")
 }
 
