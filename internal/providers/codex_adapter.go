@@ -659,6 +659,13 @@ func normalizeCodexEvent(ev codexJSONEvent, raw map[string]any) (Event, bool) {
 				}, true
 			}
 			return Event{}, true
+		case "tool_call":
+			return Event{
+				Type:     EventToolCall,
+				ItemType: itemType,
+				ItemID:   itemID,
+				Text:     firstNonEmptyString(item, "text", "name", "tool_name"),
+			}, true
 		default:
 			return Event{}, false
 		}
@@ -721,6 +728,15 @@ func findFirstString(v any, keys ...string) string {
 			if s := findFirstString(item, keys...); s != "" {
 				return s
 			}
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyString(m map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if s, ok := m[key].(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
 		}
 	}
 	return ""

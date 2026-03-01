@@ -303,6 +303,27 @@ func TestCommandAndReasoningEventsAppearInTranscript(t *testing.T) {
 	}
 }
 
+func TestToolCallEventAppearsInTranscript(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s := m.createSession("demo")
+	m.ActiveSessionID = s.ID
+	m.Width = 100
+	m.Height = 24
+
+	m.handleProviderEvent(providers.Event{
+		Type:      providers.EventToolCall,
+		SessionID: s.ID,
+		Text:      "patched files",
+	})
+
+	view := m.View()
+	if !strings.Contains(view, "[tool-call] patched files") {
+		t.Fatalf("expected transcript to contain tool-call line, got: %s", view)
+	}
+}
+
 func TestViewFitsConfiguredHeight(t *testing.T) {
 	t.Parallel()
 

@@ -173,6 +173,88 @@ func TestNormalizeCodexEventAgentMessage(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexEventToolCall(t *testing.T) {
+	t.Parallel()
+
+	ev := codexJSONEvent{Type: "item.completed"}
+	raw := map[string]any{
+		"type": "item.completed",
+		"item": map[string]any{
+			"id":   "item-4",
+			"type": "tool_call",
+			"text": "patched files",
+		},
+	}
+	got, ok := normalizeCodexEvent(ev, raw)
+	if !ok {
+		t.Fatalf("expected tool_call normalization")
+	}
+	if got.Type != EventToolCall || got.ItemType != "tool_call" || got.ItemID != "item-4" || got.Text != "patched files" {
+		t.Fatalf("unexpected tool_call normalized event: %#v", got)
+	}
+}
+
+func TestNormalizeCodexEventToolCallTextFallback(t *testing.T) {
+	t.Parallel()
+
+	ev := codexJSONEvent{Type: "item.completed"}
+	rawName := map[string]any{
+		"type": "item.completed",
+		"item": map[string]any{
+			"id":   "item-5",
+			"type": "tool_call",
+			"name": "apply_patch",
+		},
+	}
+	got, ok := normalizeCodexEvent(ev, rawName)
+	if !ok || got.Type != EventToolCall || got.Text != "apply_patch" {
+		t.Fatalf("expected tool_call text fallback from name, got %#v ok=%v", got, ok)
+	}
+
+	rawToolName := map[string]any{
+		"type": "item.completed",
+		"item": map[string]any{
+			"id":        "item-6",
+			"type":      "tool_call",
+			"tool_name": "exec_command",
+		},
+	}
+	got, ok = normalizeCodexEvent(ev, rawToolName)
+	if !ok || got.Type != EventToolCall || got.Text != "exec_command" {
+		t.Fatalf("expected tool_call text fallback from tool_name, got %#v ok=%v", got, ok)
+	}
+
+	rawEmpty := map[string]any{
+		"type": "item.completed",
+		"item": map[string]any{
+			"id":   "item-7",
+			"type": "tool_call",
+		},
+	}
+	got, ok = normalizeCodexEvent(ev, rawEmpty)
+	if !ok || got.Type != EventToolCall || got.Text != "" {
+		t.Fatalf("expected empty tool_call text fallback, got %#v ok=%v", got, ok)
+	}
+}
+
+func TestNormalizeCodexEventUnknownItemSubtypeIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	ev := codexJSONEvent{Type: "item.completed"}
+	raw := map[string]any{
+		"type": "item.completed",
+		"item": map[string]any{
+			"id":   "item-unknown",
+			"type": "totally_new_item_type",
+			"text": "new payload",
+		},
+	}
+	got, ok := normalizeCodexEvent(ev, raw)
+	if ok {
+		t.Fatalf("expected unknown item subtype to return ok=false, got %#v", got)
+	}
+}
+
 func TestNormalizeCodexEventTurnUsage(t *testing.T) {
 	t.Parallel()
 

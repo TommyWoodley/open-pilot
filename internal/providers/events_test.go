@@ -41,3 +41,11 @@ func TestParseWrapperEventUnknownType(t *testing.T) {
 		t.Fatalf("expected raw json to be preserved")
 	}
 }
+
+func TestIsKnownEventTypeIncludesToolCall(t *testing.T) {
+	t.Parallel()
+
+	if !isKnownEventType("tool_call") {
+		t.Fatalf("expected tool_call to be recognized as known event type")
+	}
+}
