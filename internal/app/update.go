@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,6 +12,12 @@ import (
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if idx, ok := functionKeyIndex(strings.ToLower(msg.String())); ok {
+			if sessionID, exists := m.sessionIDForFunctionKey(idx); exists && m.useSession(sessionID) {
+				m.ProviderState = m.sessionState(sessionID)
+			}
+			return m, nil
+		}
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			m.shutdownProviders(context.TODO())

@@ -83,3 +83,22 @@ func TestGenerationTickAdvancesOnlyWhenBusy(t *testing.T) {
 		t.Fatalf("expected tick unchanged when not busy, got %d", again.GeneratingTick)
 	}
 }
+
+func TestUpdateFunctionKeySwitchesSession(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(nil, config.Default())
+	s1 := m.createSession("session-one")
+	s2 := m.createSession("session-two")
+	m.ActiveSessionID = s2.ID
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyF1})
+	nextModel := updated.(Model)
+
+	if nextModel.ActiveSessionID != s1.ID {
+		t.Fatalf("expected F1 to switch to first session, got %q", nextModel.ActiveSessionID)
+	}
+	if nextModel.store.ActiveSessionID != s1.ID {
+		t.Fatalf("expected store active session to match, got %q", nextModel.store.ActiveSessionID)
+	}
+}

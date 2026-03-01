@@ -135,13 +135,13 @@ func (m *Model) clampTranscriptScroll() {
 func (m Model) transcriptOuterHeight() int {
 	suggestions := m.renderSuggestions()
 	suggestionsHeight := 0
-	separators := 5 // header/chat (2), chat/input (2), input/status (1)
+	separators := 6 // header/session (1), session/chat (2), chat/input (2), input/status (1)
 	if suggestions != "" {
 		suggestionsHeight = lipgloss.Height(suggestions)
-		separators = 6 // + input/suggestions (1), suggestions/status (1)
+		separators = 7 // + input/suggestions (1), suggestions/status (1)
 	}
 
-	headerHeight := lipgloss.Height(ui.HeaderStyle.Render("open-pilot"))
+	headerHeight := lipgloss.Height(ui.HeaderStyle.Render("open-pilot")) + lipgloss.Height(m.renderSessionBar())
 	inputHeight := lipgloss.Height(ui.InputStyle.Width(max(m.Width-2, 50)).Render("> " + m.Input))
 	statusHeight := lipgloss.Height(m.renderStatus())
 
