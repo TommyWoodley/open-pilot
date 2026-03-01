@@ -75,6 +75,7 @@ func (p *SQLitePersister) initSchema() error {
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			provider_id TEXT NOT NULL DEFAULT '',
+			codex_thread_id TEXT NOT NULL DEFAULT '',
 			active_repo_id TEXT NOT NULL DEFAULT '',
 			created_at_unix INTEGER NOT NULL,
 			sort_order INTEGER NOT NULL
@@ -109,6 +110,48 @@ func (p *SQLitePersister) initSchema() error {
 			return fmt.Errorf("init sqlite schema: %w", err)
 		}
 	}
+	if err := p.ensureSessionColumn("codex_thread_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *SQLitePersister) ensureSessionColumn(name, ddl string) error {
+	rows, err := p.db.Query(`PRAGMA table_info(sessions)`)
+	if err != nil {
+		return fmt.Errorf("inspect sessions schema: %w", err)
+	}
+	defer rows.Close()
+
+	hasColumn := false
+	for rows.Next() {
+		var (
+			cid       int
+			colName   string
+			colType   string
+			notNull   int
+			dfltValue any
+			pk        int
+		)
+		if err := rows.Scan(&cid, &colName, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return fmt.Errorf("scan sessions schema: %w", err)
+		}
+		if colName == name {
+			hasColumn = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate sessions schema: %w", err)
+	}
+	if hasColumn {
+		return nil
+	}
+
+	stmt := fmt.Sprintf("ALTER TABLE sessions ADD COLUMN %s %s", name, ddl)
+	if _, err := p.db.Exec(stmt); err != nil {
+		return fmt.Errorf("migrate sessions schema (%s): %w", name, err)
+	}
 	return nil
 }
 
@@ -131,8 +174,8 @@ func (p *SQLitePersister) Save(snapshot session.Snapshot) error {
 	}
 
 	for i, s := range snapshot.Sessions {
-		if _, err := tx.Exec(`INSERT INTO sessions(id, name, provider_id, active_repo_id, created_at_unix, sort_order) VALUES (?, ?, ?, ?, ?, ?)`,
-			s.ID, s.Name, s.ProviderID, s.ActiveRepoID, s.CreatedAt, i); err != nil {
+		if _, err := tx.Exec(`INSERT INTO sessions(id, name, provider_id, codex_thread_id, active_repo_id, created_at_unix, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			s.ID, s.Name, s.ProviderID, s.CodexThreadID, s.ActiveRepoID, s.CreatedAt, i); err != nil {
 			return fmt.Errorf("insert session: %w", err)
 		}
 		for j, repo := range s.Repos {
@@ -176,7 +219,7 @@ func (p *SQLitePersister) Load() (session.Snapshot, error) {
 		return snap, fmt.Errorf("load app state: %w", err)
 	}
 
-	sRows, err := p.db.Query(`SELECT id, name, provider_id, active_repo_id, created_at_unix FROM sessions ORDER BY sort_order ASC`)
+	sRows, err := p.db.Query(`SELECT id, name, provider_id, codex_thread_id, active_repo_id, created_at_unix FROM sessions ORDER BY sort_order ASC`)
 	if err != nil {
 		return snap, fmt.Errorf("load sessions: %w", err)
 	}
@@ -186,7 +229,7 @@ func (p *SQLitePersister) Load() (session.Snapshot, error) {
 	order := make([]string, 0)
 	for sRows.Next() {
 		var s session.SessionSnapshot
-		if err := sRows.Scan(&s.ID, &s.Name, &s.ProviderID, &s.ActiveRepoID, &s.CreatedAt); err != nil {
+		if err := sRows.Scan(&s.ID, &s.Name, &s.ProviderID, &s.CodexThreadID, &s.ActiveRepoID, &s.CreatedAt); err != nil {
 			return snap, fmt.Errorf("scan session: %w", err)
 		}
 		s.Repos = []domain.RepoRef{}

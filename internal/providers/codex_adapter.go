@@ -72,6 +72,7 @@ func (a *codexCLIAdapter) Start(_ context.Context, req StartRequest) (SessionHan
 		sessionID: req.SessionID,
 		repoPath:  req.RepoPath,
 		events:    make(chan Event, 64),
+		codexID:   strings.TrimSpace(req.ProviderThreadID),
 	}
 
 	a.mu.Lock()
@@ -200,6 +201,12 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 	h.mu.Lock()
 	existingID := h.codexID
 	h.mu.Unlock()
+	if existingID == "" {
+		existingID = strings.TrimSpace(prompt.ProviderThreadID)
+	}
+	if prompt.DisableResume {
+		existingID = ""
+	}
 
 	outputPath := ""
 	if existingID == "" {
@@ -599,7 +606,7 @@ func normalizeCodexEvent(ev codexJSONEvent, raw map[string]any) (Event, bool) {
 	t := strings.ToLower(strings.TrimSpace(ev.Type))
 	switch t {
 	case "thread.started":
-		return Event{Type: EventStatus, Message: "thread started"}, true
+		return Event{Type: EventStatus, Message: "thread started", ProviderThreadID: strings.TrimSpace(ev.ThreadID)}, true
 	case "turn.started":
 		return Event{Type: EventStatus, Message: "turn started"}, true
 	case "turn.completed":

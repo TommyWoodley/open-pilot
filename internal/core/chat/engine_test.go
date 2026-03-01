@@ -16,17 +16,20 @@ import (
 )
 
 type fakeManager struct {
-	events chan providers.Event
-	sends  []fakeSendPromptCall
-	err    error
+	events   chan providers.Event
+	sends    []fakeSendPromptCall
+	err      error
+	sendErrs []error
 }
 
 type fakeSendPromptCall struct {
-	providerID string
-	sessionID  string
-	repoPath   string
-	requestID  string
-	prompt     string
+	providerID       string
+	sessionID        string
+	repoPath         string
+	requestID        string
+	prompt           string
+	providerThreadID string
+	disableResume    bool
 }
 
 type fakeHooks struct {
@@ -340,14 +343,21 @@ func TestEmitAutoReviewEventLogsWarningWhenQueueFull(t *testing.T) {
 	}
 }
 
-func (f *fakeManager) SendPrompt(_ context.Context, providerID, sessionID, repoPath, requestID, prompt string) error {
+func (f *fakeManager) SendPrompt(_ context.Context, providerID, sessionID, repoPath, requestID, prompt string, opts providers.SendOptions) error {
 	f.sends = append(f.sends, fakeSendPromptCall{
-		providerID: providerID,
-		sessionID:  sessionID,
-		repoPath:   repoPath,
-		requestID:  requestID,
-		prompt:     prompt,
+		providerID:       providerID,
+		sessionID:        sessionID,
+		repoPath:         repoPath,
+		requestID:        requestID,
+		prompt:           prompt,
+		providerThreadID: opts.ProviderThreadID,
+		disableResume:    opts.DisableResume,
 	})
+	if len(f.sendErrs) > 0 {
+		err := f.sendErrs[0]
+		f.sendErrs = f.sendErrs[1:]
+		return err
+	}
 	return f.err
 }
 func (f *fakeManager) Events() <-chan providers.Event { return f.events }
@@ -359,6 +369,70 @@ func TestPromptBlockedWithoutSession(t *testing.T) {
 	eng.SendPrompt("hello")
 	if eng.StatusText == "" {
 		t.Fatalf("expected status text when prompt blocked")
+	}
+}
+
+func TestSendPromptUsesStoredCodexThreadID(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	s.CodexThreadID = "thread-123"
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	mgr := &fakeManager{events: make(chan providers.Event)}
+	eng := NewEngine(store, mgr, config.Default())
+
+	eng.SendPrompt("hello")
+
+	if len(mgr.sends) != 1 {
+		t.Fatalf("expected one send, got %d", len(mgr.sends))
+	}
+	if mgr.sends[0].providerThreadID != "thread-123" {
+		t.Fatalf("expected provider thread id thread-123, got %q", mgr.sends[0].providerThreadID)
+	}
+	if mgr.sends[0].disableResume {
+		t.Fatalf("expected normal send to keep resume enabled")
+	}
+}
+
+func TestSendPromptResumeFailureRetriesWithReplayAndWarning(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	s.CodexThreadID = "thread-xyz"
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	store.AppendUserMessage("codex", store.ActiveSession().ActiveRepoID, "prior question")
+	store.AppendAssistantMessage(s.ID, "prior answer")
+
+	mgr := &fakeManager{
+		events:   make(chan providers.Event),
+		sendErrs: []error{errors.New("resume failed"), nil},
+	}
+	eng := NewEngine(store, mgr, config.Default())
+
+	eng.SendPrompt("new question")
+
+	if len(mgr.sends) != 2 {
+		t.Fatalf("expected one retry with replay fallback, got %d sends", len(mgr.sends))
+	}
+	if !mgr.sends[1].disableResume {
+		t.Fatalf("expected fallback retry to disable resume")
+	}
+	if !strings.Contains(mgr.sends[1].prompt, "prior question") || !strings.Contains(mgr.sends[1].prompt, "prior answer") {
+		t.Fatalf("expected fallback prompt to include replayed conversation, got %q", mgr.sends[1].prompt)
+	}
+
+	warningCount := 0
+	for _, msg := range store.ActiveSession().Messages {
+		if strings.Contains(msg.Content, "Resumed via replay; prior chat was resent to restore context.") {
+			warningCount++
+		}
+	}
+	if warningCount != 1 {
+		t.Fatalf("expected one replay warning message, got %d", warningCount)
 	}
 }
 
@@ -465,6 +539,25 @@ func TestHandleProviderReadyDoesNotClearBusyWhenPendingRequestExists(t *testing.
 
 	if eng.ProviderState != "busy" {
 		t.Fatalf("expected provider state to remain busy while pending, got %q", eng.ProviderState)
+	}
+}
+
+func TestHandleProviderEventStoresCodexThreadID(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	s.ProviderID = "codex"
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:             providers.EventStatus,
+		SessionID:        s.ID,
+		Provider:         "codex",
+		Message:          "thread started",
+		ProviderThreadID: "thread-xyz",
+	})
+
+	if got := store.ActiveSession().CodexThreadID; got != "thread-xyz" {
+		t.Fatalf("expected codex thread id to be stored, got %q", got)
 	}
 }
 

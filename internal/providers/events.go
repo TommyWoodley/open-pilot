@@ -34,6 +34,7 @@ type Event struct {
 	CommandStatus          string
 	CommandExitCode        *int
 	CommandOutput          string
+	ProviderThreadID       string
 	UsageInputTokens       int
 	UsageCachedInputTokens int
 	UsageOutputTokens      int

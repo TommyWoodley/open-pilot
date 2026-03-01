@@ -22,6 +22,7 @@ type SessionSnapshot struct {
 	ID                    string
 	Name                  string
 	ProviderID            string
+	CodexThreadID         string
 	AutoReviewLoopEnabled bool
 	ActiveRepoID          string
 	CreatedAt             int64
@@ -522,6 +523,7 @@ func (s *Store) snapshot() Snapshot {
 			ID:                    ss.ID,
 			Name:                  ss.Name,
 			ProviderID:            ss.ProviderID,
+			CodexThreadID:         ss.CodexThreadID,
 			AutoReviewLoopEnabled: ss.AutoReviewLoopEnabled,
 			ActiveRepoID:          ss.ActiveRepoID,
 			CreatedAt:             ss.CreatedAt.Unix(),
@@ -555,6 +557,7 @@ func (s *Store) applySnapshot(snap Snapshot) {
 			ID:                    ss.ID,
 			Name:                  ss.Name,
 			ProviderID:            ss.ProviderID,
+			CodexThreadID:         ss.CodexThreadID,
 			AutoReviewLoopEnabled: ss.AutoReviewLoopEnabled,
 			ActiveRepoID:          ss.ActiveRepoID,
 			CreatedAt:             time.Unix(ss.CreatedAt, 0),

@@ -7,17 +7,20 @@ type SessionHandle string
 
 // StartRequest is the input for starting a provider process.
 type StartRequest struct {
-	SessionID string
-	Provider  string
-	RepoPath  string
+	SessionID        string
+	Provider         string
+	RepoPath         string
+	ProviderThreadID string
 }
 
 // PromptRequest is one user prompt bound to a target repository.
 type PromptRequest struct {
-	ID        string
-	SessionID string
-	Text      string
-	RepoPath  string
+	ID               string
+	SessionID        string
+	Text             string
+	RepoPath         string
+	ProviderThreadID string
+	DisableResume    bool
 }
 
 // Adapter wraps provider process lifecycle and IO.

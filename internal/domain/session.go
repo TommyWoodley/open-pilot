@@ -14,6 +14,7 @@ type Session struct {
 	ID                    string
 	Name                  string
 	ProviderID            string
+	CodexThreadID         string
 	AutoReviewLoopEnabled bool
 	Repos                 []RepoRef
 	ActiveRepoID          string
