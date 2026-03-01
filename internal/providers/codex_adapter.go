@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const codexScannerMaxTokenSize = 8 * 1024 * 1024
+
 type codexCLIAdapter struct {
 	binary string
 
@@ -253,6 +255,7 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 	go func() {
 		defer wg.Done()
 		s := bufio.NewScanner(stdout)
+		s.Buffer(make([]byte, 64*1024), codexScannerMaxTokenSize)
 		for s.Scan() {
 			line := s.Text()
 			trimmed := strings.TrimSpace(line)
@@ -325,6 +328,7 @@ func (a *codexCLIAdapter) runCodexPrompt(ctx context.Context, h *codexHandle, pr
 	go func() {
 		defer wg.Done()
 		s := bufio.NewScanner(stderr)
+		s.Buffer(make([]byte, 64*1024), codexScannerMaxTokenSize)
 		for s.Scan() {
 			rawLine := strings.TrimSpace(s.Text())
 			a.logf("stderr", "%s", rawLine)

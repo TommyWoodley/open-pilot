@@ -352,6 +352,20 @@ func TestCodexAdapterEmitsReasoningAndCommandLifecycleEvents(t *testing.T) {
 	_ = waitEventType(t, events, EventFinal)
 }
 
+func TestCodexAdapterHandlesLargeStdoutJSONLine(t *testing.T) {
+	env := setupFakeCodex(t, "large_json_line", "thread-large", "ok")
+
+	adapter := newCodexCLIAdapter(env.binary).(*codexCLIAdapter)
+	handle, events := startHandle(t, adapter, env.repoDir)
+
+	if err := adapter.Send(context.Background(), handle, PromptRequest{ID: "req-large", SessionID: "sess-1", RepoPath: env.repoDir, Text: "hello"}); err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+
+	_ = waitEventType(t, events, EventFinal)
+	assertNoEventTypeWithin(t, events, EventError, 300*time.Millisecond)
+}
+
 type fakeCodexEnv struct {
 	binary   string
 	repoDir  string
@@ -448,6 +462,14 @@ if [ "$mode" = "lifecycle" ]; then
   printf '{"type":"item.completed","item":{"id":"item-c","type":"command_execution","command":"go test ./...","aggregated_output":"ok\\n","exit_code":0,"status":"completed"}}\n'
   printf '{"type":"response.output_text.delta","delta":"%s"}\n' "$last_message"
   printf '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3}}\n'
+  printf '%s' "$last_message" > "$out_file"
+  exit 0
+fi
+if [ "$mode" = "large_json_line" ]; then
+  printf '{"type":"thread.started","thread_id":"%s"}\n' "$thread_id"
+  big_payload=$(printf 'x%.0s' $(seq 1 70000))
+  printf '{"type":"item.completed","item":{"id":"item-big","type":"command_execution","aggregated_output":"%s"}}\n' "$big_payload"
+  printf '{"type":"response.output_text.delta","delta":"%s"}\n' "$last_message"
   printf '%s' "$last_message" > "$out_file"
   exit 0
 fi
