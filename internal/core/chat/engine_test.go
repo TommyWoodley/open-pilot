@@ -1720,3 +1720,159 @@ func TestProviderCodexSelectedHookFailureBlocksPrompts(t *testing.T) {
 		t.Fatalf("expected hooks blocked status, got %q", eng.StatusText)
 	}
 }
+
+func TestHandleProviderAgentMessageExecutesSafePilotRecommendation(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+
+	var commands []string
+	eng.runCmd = func(_ context.Context, _ string, name string, args ...string) (string, error) {
+		commands = append(commands, name+" "+strings.Join(args, " "))
+		if len(args) == 3 && args[0] == "diff" && args[1] == "--cached" && args[2] == "--quiet" {
+			return "", &fakeExitError{code: 1}
+		}
+		return "", nil
+	}
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventAgentMessage,
+		SessionID: s.ID,
+		RequestID: "req-1",
+		Text: strings.TrimSpace(`
+<SAFE_PILOT_COMMITTING_START>
+<COMMIT_RECOMMENDATION>
+status: safe
+security_scan: pass
+issues_found: 0
+commits_proposed: 1
+commits:
+  - id: 1
+    type: feat
+    scope: auth
+    subject: implement JWT-based authentication
+    body: |
+      Add login endpoint and token validation middleware.
+    files:
+      - src/auth/login.js
+      - src/auth/jwt.js
+    breaking: false
+    closes: "#234"
+</COMMIT_RECOMMENDATION>
+<SAFE_PILOT_COMMITTING_END>
+`),
+	})
+
+	got := strings.Join(commands, "\n")
+	if !containsAll(
+		got,
+		"git add -- src/auth/login.js src/auth/jwt.js",
+		"git diff --cached --quiet",
+		"git commit -m feat(auth): implement JWT-based authentication -m Add login endpoint and token validation middleware. -m #234",
+	) {
+		t.Fatalf("expected git add/diff/commit sequence, got %q", got)
+	}
+
+	last := store.ActiveSession().Messages[len(store.ActiveSession().Messages)-1].Content
+	if !strings.Contains(last, "Safe-pilot committing created 1 commit(s).") {
+		t.Fatalf("expected success system message, got %q", last)
+	}
+}
+
+func TestHandleProviderAgentMessageSkipsBlockedSafePilotRecommendation(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+
+	calls := 0
+	eng.runCmd = func(_ context.Context, _ string, _ string, _ ...string) (string, error) {
+		calls++
+		return "", nil
+	}
+
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventAgentMessage,
+		SessionID: s.ID,
+		Text: strings.TrimSpace(`
+<COMMIT_RECOMMENDATION>
+status: blocked
+security_scan: fail
+issues_found: 2
+commits_proposed: 0
+commits: []
+</COMMIT_RECOMMENDATION>
+`),
+	})
+
+	if calls != 0 {
+		t.Fatalf("expected blocked recommendation to skip git commands, got %d calls", calls)
+	}
+	last := store.ActiveSession().Messages[len(store.ActiveSession().Messages)-1].Content
+	if !strings.Contains(last, "Safe-pilot committing blocked by recommendation") {
+		t.Fatalf("expected blocked status message, got %q", last)
+	}
+}
+
+func TestSafePilotRecommendationIsDedupedAcrossEvents(t *testing.T) {
+	store := session.NewStore()
+	s := store.CreateSession("demo")
+	if err := store.AddRepoToActiveSession(t.TempDir(), "repo"); err != nil {
+		t.Fatalf("add repo: %v", err)
+	}
+	eng := NewEngine(store, &fakeManager{events: make(chan providers.Event)}, config.Default())
+
+	var calls []string
+	eng.runCmd = func(_ context.Context, _ string, name string, args ...string) (string, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		if len(args) == 3 && args[0] == "diff" && args[1] == "--cached" && args[2] == "--quiet" {
+			return "", &fakeExitError{code: 1}
+		}
+		return "", nil
+	}
+
+	text := strings.TrimSpace(`
+<COMMIT_RECOMMENDATION>
+status: safe
+security_scan: pass
+issues_found: 0
+commits_proposed: 1
+commits:
+  - id: 1
+    type: chore
+    scope: deps
+    subject: update lockfile
+    files:
+      - go.sum
+    breaking: false
+    closes: ""
+</COMMIT_RECOMMENDATION>
+`)
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventAgentMessage,
+		SessionID: s.ID,
+		RequestID: "req-1",
+		Text:      text,
+	})
+	eng.HandleProviderEvent(providers.Event{
+		Type:      providers.EventFinal,
+		SessionID: s.ID,
+		RequestID: "req-1",
+		Text:      text,
+	})
+
+	commitCalls := 0
+	for _, cmd := range calls {
+		if strings.HasPrefix(cmd, "git commit ") {
+			commitCalls++
+		}
+	}
+	if commitCalls != 1 {
+		t.Fatalf("expected one git commit after dedupe, got %d (%q)", commitCalls, strings.Join(calls, "\n"))
+	}
+}

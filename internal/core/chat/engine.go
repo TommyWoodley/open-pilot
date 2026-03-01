@@ -109,6 +109,8 @@ type Engine struct {
 	autoReviewRunner    autoReviewRunner
 	autoReviewMaxCycles int
 	replayWarned        map[string]bool
+	runCmd              func(ctx context.Context, dir, name string, args ...string) (string, error)
+	processedCommitRec  map[string]struct{}
 }
 
 func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config) *Engine {
@@ -132,6 +134,8 @@ func NewEngine(store *session.Store, manager ProviderManager, cfg config.Config)
 		autoReviewRunner:    newCLIAutoReviewRunner(),
 		autoReviewMaxCycles: 5,
 		replayWarned:        make(map[string]bool),
+		runCmd:              runCommandCapture,
+		processedCommitRec:  make(map[string]struct{}),
 	}
 }
 
@@ -623,6 +627,7 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 			e.Store.AddAssistantMessage(ev.SessionID, ev.Text)
 		}
 		e.runDevelopmentWorkCompleteHooksForContent(s, ev.Text)
+		e.runSafePilotCommitRecommendation(s, ev.RequestID, ev.Text)
 		e.ProviderState = "ready"
 		e.StatusText = "Response complete"
 	case providers.EventError:
@@ -660,6 +665,7 @@ func (e *Engine) HandleProviderEvent(ev providers.Event) {
 			e.Store.AddAssistantMessage(s.ID, text)
 		}
 		e.runDevelopmentWorkCompleteHooksForContent(s, ev.Text)
+		e.runSafePilotCommitRecommendation(s, ev.RequestID, ev.Text)
 	case providers.EventCommandExecution:
 		e.handleCommandExecutionEvent(s.ID, ev)
 	case providers.EventTurnUsage:
